@@ -8,6 +8,23 @@ const EXPLICIT_BLOCK: u8 = 1 << 2;
 const EXPLICIT_ALLOW: u8 = 1 << 3;
 const CLASSIFICATION_REQUIRED: u8 = 1 << 4;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicySet {
+    default_decision: Decision,
+}
+
+impl PolicySet {
+    #[must_use]
+    pub const fn new(default_decision: Decision) -> Self {
+        Self { default_decision }
+    }
+
+    #[must_use]
+    pub const fn default_decision(self) -> Decision {
+        self.default_decision
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DecisionContext {
     facts: u8,

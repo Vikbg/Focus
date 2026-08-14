@@ -11,8 +11,8 @@ mod vpn;
 
 pub use decision::{BlockReason, Decision};
 pub use emergency::EmergencyState;
-pub use policy::{DecisionContext, PolicyEngine};
-pub use profile::{PolicyVersion, ProfileId};
+pub use policy::{DecisionContext, PolicyEngine, PolicySet};
+pub use profile::{PolicyVersion, Profile, ProfileId, SessionPolicySnapshot};
 pub use schedule::ScheduleSource;
 pub use session::SessionId;
 pub use state_machine::{SessionGuard, SessionState, TransitionError};
