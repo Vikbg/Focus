@@ -1,6 +1,4 @@
-use focus_core::{
-    BlockReason, Decision, PolicySet, PolicyVersion, Profile, ProfileId,
-};
+use focus_core::{BlockReason, Decision, PolicySet, PolicyVersion, Profile, ProfileId};
 
 #[test]
 fn active_session_snapshot_keeps_original_profile_version_and_policy() {
