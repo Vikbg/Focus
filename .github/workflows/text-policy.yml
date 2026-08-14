@@ -1,0 +1,15 @@
+name: Text policy
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  no-em-dash:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reject forbidden punctuation
+        run: python3 scripts/check-no-em-dash.py
