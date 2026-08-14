@@ -1,0 +1,13 @@
+{
+  "name": "@focus/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
