@@ -2,6 +2,9 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockReason {
+    SecurityInvariant,
+    SessionRestriction,
+    ExplicitBlock,
     Unknown,
 }
 
