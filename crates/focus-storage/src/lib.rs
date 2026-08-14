@@ -100,7 +100,11 @@ pub trait FocusStore {
     /// # Errors
     ///
     /// Returns an error when the database write fails.
-    fn set_active_session(&mut self, session_id: SessionId, state: SessionState) -> StoreResult<()>;
+    fn set_active_session(
+        &mut self,
+        session_id: SessionId,
+        state: SessionState,
+    ) -> StoreResult<()>;
 
     /// Atomically appends a transition and updates the active session.
     ///
@@ -205,7 +209,11 @@ impl FocusStore for SqliteStore {
         .transpose()
     }
 
-    fn set_active_session(&mut self, session_id: SessionId, state: SessionState) -> StoreResult<()> {
+    fn set_active_session(
+        &mut self,
+        session_id: SessionId,
+        state: SessionState,
+    ) -> StoreResult<()> {
         self.connection.execute(
             "INSERT INTO active_session(singleton, session_id, state)
              VALUES(1, ?1, ?2)
@@ -248,11 +256,11 @@ impl FocusStore for SqliteStore {
     }
 
     fn transition_count(&self) -> StoreResult<u64> {
-        let count = self.connection.query_row(
-            "SELECT COUNT(*) FROM session_transitions",
-            [],
-            |row| row.get::<_, i64>(0),
-        )?;
+        let count =
+            self.connection
+                .query_row("SELECT COUNT(*) FROM session_transitions", [], |row| {
+                    row.get::<_, i64>(0)
+                })?;
         u64::try_from(count).map_err(|_| StoreError::InvalidCount(count))
     }
 }
