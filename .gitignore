@@ -1,0 +1,34 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+
+# Tauri
+apps/desktop/src-tauri/target/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Local development
+.env
+.env.*
+!.env.example
+.worktrees/
+
+# Runtime state
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+*.AppImage
+*.deb
