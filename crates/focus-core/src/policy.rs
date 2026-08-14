@@ -2,56 +2,51 @@
 
 use crate::{BlockReason, Decision};
 
+const SECURITY_INVARIANT_VIOLATION: u8 = 1 << 0;
+const SESSION_RESTRICTION: u8 = 1 << 1;
+const EXPLICIT_BLOCK: u8 = 1 << 2;
+const EXPLICIT_ALLOW: u8 = 1 << 3;
+const CLASSIFICATION_REQUIRED: u8 = 1 << 4;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DecisionContext {
-    security_invariant_violation: bool,
-    session_restriction: bool,
-    explicit_block: bool,
-    explicit_allow: bool,
-    classification_required: bool,
+    facts: u8,
 }
 
 impl DecisionContext {
     #[must_use]
     pub const fn classification_required() -> Self {
         Self {
-            classification_required: true,
-            ..Self::new()
+            facts: CLASSIFICATION_REQUIRED,
         }
     }
 
     #[must_use]
     pub const fn with_security_invariant_violation(mut self) -> Self {
-        self.security_invariant_violation = true;
+        self.facts |= SECURITY_INVARIANT_VIOLATION;
         self
     }
 
     #[must_use]
     pub const fn with_session_restriction(mut self) -> Self {
-        self.session_restriction = true;
+        self.facts |= SESSION_RESTRICTION;
         self
     }
 
     #[must_use]
     pub const fn with_explicit_block(mut self) -> Self {
-        self.explicit_block = true;
+        self.facts |= EXPLICIT_BLOCK;
         self
     }
 
     #[must_use]
     pub const fn with_explicit_allow(mut self) -> Self {
-        self.explicit_allow = true;
+        self.facts |= EXPLICIT_ALLOW;
         self
     }
 
-    const fn new() -> Self {
-        Self {
-            security_invariant_violation: false,
-            session_restriction: false,
-            explicit_block: false,
-            explicit_allow: false,
-            classification_required: false,
-        }
+    const fn contains(self, fact: u8) -> bool {
+        self.facts & fact != 0
     }
 }
 
@@ -61,23 +56,23 @@ pub struct PolicyEngine;
 impl PolicyEngine {
     #[must_use]
     pub const fn decide(self, context: &DecisionContext) -> Decision {
-        if context.security_invariant_violation {
+        if context.contains(SECURITY_INVARIANT_VIOLATION) {
             return Decision::Block(BlockReason::SecurityInvariant);
         }
 
-        if context.session_restriction {
+        if context.contains(SESSION_RESTRICTION) {
             return Decision::Block(BlockReason::SessionRestriction);
         }
 
-        if context.explicit_block {
+        if context.contains(EXPLICIT_BLOCK) {
             return Decision::Block(BlockReason::ExplicitBlock);
         }
 
-        if context.explicit_allow {
+        if context.contains(EXPLICIT_ALLOW) {
             return Decision::Allow;
         }
 
-        if context.classification_required {
+        if context.contains(CLASSIFICATION_REQUIRED) {
             return Decision::Classify;
         }
 
