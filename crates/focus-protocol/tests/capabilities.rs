@@ -1,4 +1,4 @@
-use focus_protocol::{ClientKind, Request, RequestEnvelope, RequestId, PROTOCOL_VERSION};
+use focus_protocol::{ClientKind, PROTOCOL_VERSION, Request, RequestEnvelope, RequestId};
 
 #[test]
 fn browser_bridge_cannot_start_sessions() {
