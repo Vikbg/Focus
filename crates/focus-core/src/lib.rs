@@ -15,5 +15,5 @@ pub use policy::{DecisionContext, PolicyEngine};
 pub use profile::{PolicyVersion, ProfileId};
 pub use schedule::ScheduleSource;
 pub use session::SessionId;
-pub use state_machine::SessionState;
+pub use state_machine::{SessionGuard, SessionState, TransitionError};
 pub use vpn::VpnId;
