@@ -1,0 +1,19 @@
+[workspace]
+members = [
+  "crates/*",
+  "bins/*",
+  "platform/linux",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.85"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = "deny"
+pedantic = "warn"
