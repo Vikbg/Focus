@@ -12,6 +12,7 @@ pub enum StoreError {
     StateMismatch,
     InvalidSessionId(String),
     InvalidSessionState(i64),
+    InvalidCount(i64),
 }
 
 impl fmt::Display for StoreError {
@@ -21,6 +22,7 @@ impl fmt::Display for StoreError {
             Self::StateMismatch => formatter.write_str("active session state mismatch"),
             Self::InvalidSessionId(value) => write!(formatter, "invalid session id: {value}"),
             Self::InvalidSessionState(value) => write!(formatter, "invalid session state: {value}"),
+            Self::InvalidCount(value) => write!(formatter, "invalid transition count: {value}"),
         }
     }
 }
@@ -29,7 +31,10 @@ impl Error for StoreError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Sqlite(error) => Some(error),
-            Self::StateMismatch | Self::InvalidSessionId(_) | Self::InvalidSessionState(_) => None,
+            Self::StateMismatch
+            | Self::InvalidSessionId(_)
+            | Self::InvalidSessionState(_)
+            | Self::InvalidCount(_) => None,
         }
     }
 }
@@ -246,9 +251,9 @@ impl FocusStore for SqliteStore {
         let count = self.connection.query_row(
             "SELECT COUNT(*) FROM session_transitions",
             [],
-            |row| row.get::<_, u64>(0),
+            |row| row.get::<_, i64>(0),
         )?;
-        Ok(count)
+        u64::try_from(count).map_err(|_| StoreError::InvalidCount(count))
     }
 }
 
