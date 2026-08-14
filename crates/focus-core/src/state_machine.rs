@@ -50,6 +50,14 @@ impl SessionGuard {
         self.state
     }
 
+    /// Moves this guard to an allowed next state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransitionError::MinimumDurationNotReached`] when a locked
+    /// session attempts to end before its minimum duration without emergency
+    /// authorization. Returns [`TransitionError::InvalidTransition`] for every
+    /// transition that is not explicitly allowed by the state machine.
     pub const fn transition(self, target: SessionState) -> Result<Self, TransitionError> {
         match (self.state, target) {
             (SessionState::Locked, SessionState::Ending)
