@@ -10,7 +10,10 @@ mod state_machine;
 mod vpn;
 
 pub use decision::{BlockReason, Decision};
-pub use emergency::EmergencyState;
+pub use emergency::{
+    EMERGENCY_DELAY_SECONDS, EmergencyDecision, EmergencyError, EmergencyRequest, EmergencyState,
+    RecoveryCodeHash,
+};
 pub use policy::{DecisionContext, PolicyEngine, PolicySet};
 pub use profile::{PolicyVersion, Profile, ProfileId, SessionPolicySnapshot};
 pub use schedule::{Schedule, ScheduleId, ScheduleSource, ScheduleStatus, SchedulerOutcome};
