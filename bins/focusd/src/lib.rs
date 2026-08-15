@@ -407,8 +407,7 @@ fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result
 
     let listener = UnixListener::bind(socket_path)?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))?;
-    chown(socket_path, Some(Uid::from_raw(policy.allowed_uid)), None)
-        .map_err(io::Error::other)?;
+    chown(socket_path, Some(Uid::from_raw(policy.allowed_uid)), None).map_err(io::Error::other)?;
     Ok(listener)
 }
 
