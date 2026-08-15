@@ -31,10 +31,7 @@ fn due_schedule_is_marked_missed_when_another_session_is_active() {
         schedule.evaluate(1_000, true),
         SchedulerOutcome::MissedDueToActiveSession(ScheduleId(3))
     );
-    assert_eq!(
-        schedule.status(),
-        ScheduleStatus::MissedDueToActiveSession
-    );
+    assert_eq!(schedule.status(), ScheduleStatus::MissedDueToActiveSession);
 }
 
 #[test]
