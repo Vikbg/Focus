@@ -42,6 +42,49 @@ fn security_events_are_appended_to_the_protected_journal() {
 }
 
 #[test]
+fn failed_security_journal_write_rolls_back_emergency_timing() {
+    let path = temp_database("atomic-emergency-observation");
+    let mut store = SqliteStore::open(&path).unwrap();
+    let original = EmergencyRequest::new(
+        "Need a real emergency exit",
+        sample(BOOT_A, 100, 1_000),
+        CODE,
+    )
+    .unwrap();
+    store.persist_emergency_request(&original).unwrap();
+
+    let mut candidate = original.clone();
+    let evaluation = candidate.evaluate(sample(BOOT_A, 160, 1_600), CODE);
+    assert_eq!(
+        evaluation.clock_event(),
+        EmergencyClockEvent::WallClockAnomaly
+    );
+    let event = SecurityEvent::new("emergency_clock_wall_anomaly", b"clock-jump".to_vec());
+
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_security_event
+             BEFORE INSERT ON security_events
+             BEGIN
+                 SELECT RAISE(ABORT, 'forced journal failure');
+             END;",
+        )
+        .unwrap();
+
+    let result = store.persist_emergency_observation(&candidate, Some(&event), None);
+    assert!(result.is_err());
+
+    let restored = store.emergency_request().unwrap().unwrap();
+    assert_eq!(restored.timing_state(), original.timing_state());
+    assert_eq!(store.security_event_count().unwrap(), 0);
+
+    drop(store);
+    drop(connection);
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
 fn emergency_request_survives_database_reopen_with_verified_monotonic_progress() {
     let path = temp_database("emergency");
     let mut request = EmergencyRequest::new(
