@@ -27,7 +27,10 @@ fn malformed_typed_payloads_are_rejected() {
         "1|1|desktop|emergency-request|zz",
         "1|1|desktop|emergency-code|0",
     ] {
-        assert!(RequestEnvelope::decode(frame).is_err(), "accepted {frame:?}");
+        assert!(
+            RequestEnvelope::decode(frame).is_err(),
+            "accepted {frame:?}"
+        );
     }
 }
 
