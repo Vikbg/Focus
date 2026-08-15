@@ -13,3 +13,6 @@ jobs:
 
       - name: Reject forbidden punctuation
         run: python3 scripts/check-no-em-dash.py
+
+      - name: Check CI reproducibility policy
+        run: python3 scripts/check-ci-reproducibility.py
