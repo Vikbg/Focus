@@ -195,9 +195,10 @@ fn every_supported_legacy_schema_migrates_to_current_replay_storage() {
         drop(connection);
 
         let mut store = SqliteStore::open(&path).unwrap();
+        let request_id = 10_000_u128 + u128::try_from(version).unwrap();
         assert_eq!(
             store
-                .reserve_mutation(10_000 + version as u128, b"migration-probe")
+                .reserve_mutation(request_id, b"migration-probe")
                 .unwrap(),
             MutationReservation::Started,
             "schema v{version} did not migrate to current replay storage"
