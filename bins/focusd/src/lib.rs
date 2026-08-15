@@ -4,14 +4,24 @@ use std::{
     error::Error,
     fmt, fs,
     io::{self, BufRead, BufReader, Write},
-    os::unix::net::UnixListener,
-    path::Path,
+    os::unix::{
+        fs::PermissionsExt,
+        net::{UnixListener, UnixStream},
+    },
+    path::{Path, PathBuf},
 };
 
 use focus_core::{SessionId, SessionPolicySnapshot, SessionState};
 use focus_platform::{GuardKind, PlatformBackend, PlatformError};
-use focus_protocol::{ClientKind, Request, RequestEnvelope, RequestId};
+use focus_protocol::{
+    ClientKind, ProtocolState, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope,
+    ResponseError,
+};
 use focus_storage::{FocusStore, StoreError, Transition};
+use nix::{
+    sys::socket::{getsockopt, sockopt::PeerCredentials},
+    unistd::{Uid, chown},
+};
 
 pub use focus_core::SessionState as DaemonState;
 
@@ -25,6 +35,8 @@ const REQUIRED_GUARDS: [GuardKind; 4] = [
 /// Error returned while arming a protected Focus session.
 #[derive(Debug)]
 pub enum ArmError {
+    /// Another protected session is already persisted.
+    ActiveSessionExists,
     /// The protected store could not persist session state.
     Store(StoreError),
     /// An operating-system enforcement operation failed.
@@ -34,6 +46,7 @@ pub enum ArmError {
 impl fmt::Display for ArmError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ActiveSessionExists => formatter.write_str("another Focus session is active"),
             Self::Store(error) => write!(formatter, "session store error: {error}"),
             Self::Platform(error) => write!(formatter, "platform enforcement error: {error:?}"),
         }
@@ -44,7 +57,7 @@ impl Error for ArmError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Store(error) => Some(error),
-            Self::Platform(_) => None,
+            Self::ActiveSessionExists | Self::Platform(_) => None,
         }
     }
 }
@@ -90,6 +103,50 @@ impl From<StoreError> for RecoveryError {
     }
 }
 
+/// Policy used by the production Unix-socket server to authenticate CLI peers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerPolicy {
+    allowed_uid: u32,
+    cli_executable: PathBuf,
+}
+
+impl PeerPolicy {
+    /// Creates a peer policy for one user and one canonical CLI executable.
+    #[must_use]
+    pub fn new(allowed_uid: u32, cli_executable: PathBuf) -> Self {
+        Self {
+            allowed_uid,
+            cli_executable,
+        }
+    }
+
+    fn authenticate(&self, stream: &UnixStream, claimed: ClientKind) -> bool {
+        if claimed != ClientKind::Cli {
+            return false;
+        }
+
+        let Ok(credentials) = getsockopt(stream, PeerCredentials) else {
+            return false;
+        };
+        if credentials.uid() != self.allowed_uid || credentials.pid() <= 0 {
+            return false;
+        }
+
+        let peer_executable = PathBuf::from(format!("/proc/{}/exe", credentials.pid()));
+        let Ok(peer_executable) = fs::read_link(peer_executable) else {
+            return false;
+        };
+        let Ok(peer_executable) = fs::canonicalize(peer_executable) else {
+            return false;
+        };
+        let Ok(expected_executable) = fs::canonicalize(&self.cli_executable) else {
+            return false;
+        };
+
+        peer_executable == expected_executable
+    }
+}
+
 /// Arms one Focus session and reports Locked only after all critical guards are healthy.
 ///
 /// The supplied policy is already a versioned immutable snapshot. It is cloned at the
@@ -97,10 +154,9 @@ impl From<StoreError> for RecoveryError {
 ///
 /// # Errors
 ///
-/// Returns [`ArmError::Store`] when protected state cannot be persisted, or
-/// [`ArmError::Platform`] when preflight, application closure, guard activation,
-/// or health verification fails. A platform failure after Arming is persisted
-/// deliberately leaves the session in Arming for recovery on restart.
+/// Returns [`ArmError::ActiveSessionExists`] when protected state already contains
+/// an active session, [`ArmError::Store`] when state cannot be persisted, or
+/// [`ArmError::Platform`] when platform preparation or enforcement fails.
 pub async fn arm_session<S, B>(
     store: &mut S,
     backend: &mut B,
@@ -111,6 +167,10 @@ where
     S: FocusStore,
     B: PlatformBackend,
 {
+    if store.active_session()?.is_some() {
+        return Err(ArmError::ActiveSessionExists);
+    }
+
     backend.preflight().await?;
     store.set_active_session(session_id, SessionState::Arming)?;
 
@@ -136,19 +196,16 @@ where
     Ok(SessionState::Locked)
 }
 
-/// Recovers a persisted session after daemon restart.
+/// Recovers a persisted protected session after daemon restart.
 ///
-/// Arming is first persisted as Recovering. Critical guards are then reapplied and
-/// verified. Healthy enforcement advances to Locked. Any platform failure advances
-/// to `ProtectionFailure` so the failure survives another restart.
-///
-/// Existing stable states are returned unchanged, and a missing active session is
-/// treated as Idle.
+/// Persisted `Arming` and `Locked` sessions first transition to `Recovering`.
+/// Recovery then repeats preflight, closes blocked applications, rearms all critical
+/// guards, and verifies them before `Locked` may be persisted again. Any platform
+/// failure advances to `ProtectionFailure`.
 ///
 /// # Errors
 ///
-/// Returns [`RecoveryError::Store`] if protected state cannot be queried or a
-/// recovery transition cannot be persisted.
+/// Returns [`RecoveryError::Store`] if protected state cannot be queried or updated.
 pub async fn recover_session<S, B>(
     store: &mut S,
     backend: &mut B,
@@ -162,22 +219,24 @@ where
     };
 
     let session_id = active.id();
-    let mut state = active.state();
+    let state = active.state();
 
-    if state == SessionState::Arming {
-        store.persist_transition(&Transition::new(
-            session_id,
-            SessionState::Arming,
-            SessionState::Recovering,
-        ))?;
-        state = SessionState::Recovering;
-    }
+    let state = match state {
+        SessionState::Arming | SessionState::Locked => {
+            store.persist_transition(&Transition::new(
+                session_id,
+                state,
+                SessionState::Recovering,
+            ))?;
+            SessionState::Recovering
+        }
+        SessionState::Recovering => SessionState::Recovering,
+        other => return Ok(other),
+    };
 
-    if state != SessionState::Recovering {
-        return Ok(state);
-    }
+    debug_assert_eq!(state, SessionState::Recovering);
 
-    if reapply_and_verify_guards(backend).await {
+    if restore_all_protections(backend).await {
         store.persist_transition(&Transition::new(
             session_id,
             SessionState::Recovering,
@@ -194,7 +253,11 @@ where
     }
 }
 
-async fn reapply_and_verify_guards<B: PlatformBackend>(backend: &mut B) -> bool {
+async fn restore_all_protections<B: PlatformBackend>(backend: &mut B) -> bool {
+    if backend.preflight().await.is_err() || backend.close_blocked_apps().await.is_err() {
+        return false;
+    }
+
     for guard in REQUIRED_GUARDS {
         if backend.arm_guard(guard).await.is_err() {
             return false;
@@ -210,116 +273,191 @@ async fn reapply_and_verify_guards<B: PlatformBackend>(backend: &mut B) -> bool 
     true
 }
 
-/// Serves one local IPC request on a Unix socket and then exits.
-///
-/// This helper is intentionally bounded for integration tests. The long-running
-/// daemon loop will build on the same request handler.
-///
-/// # Errors
-///
-/// Returns an I/O error when the socket cannot be created or the request cannot
-/// be read or answered.
-pub fn serve_once(socket_path: &Path, state: DaemonState) -> io::Result<()> {
+fn protocol_state(state: DaemonState) -> ProtocolState {
+    match state {
+        DaemonState::Idle => ProtocolState::Idle,
+        DaemonState::Preflight => ProtocolState::Preflight,
+        DaemonState::Arming => ProtocolState::Arming,
+        DaemonState::Locked => ProtocolState::Locked,
+        DaemonState::EmergencyPending => ProtocolState::EmergencyPending,
+        DaemonState::EmergencyAuthorized => ProtocolState::EmergencyAuthorized,
+        DaemonState::Ending => ProtocolState::Ending,
+        DaemonState::Recovering => ProtocolState::Recovering,
+        DaemonState::ProtectionFailure => ProtocolState::ProtectionFailure,
+    }
+}
+
+fn response_for(request: Request, state: DaemonState) -> Response {
+    match request {
+        Request::GetStatus => Response::Status(protocol_state(state)),
+        Request::GetSession => Response::Session(protocol_state(state)),
+        Request::Doctor => Response::DoctorReachable,
+        Request::GetVpnList => Response::VpnListEmpty,
+        Request::VpnUp { id } => Response::VpnUpRequested(id),
+        Request::VpnDown { id } => Response::VpnDownRequested(id),
+        _ => Response::Error(ResponseError::UnsupportedRequest),
+    }
+}
+
+fn write_response(
+    stream: &mut UnixStream,
+    request_id: RequestId,
+    response: Response,
+) -> io::Result<()> {
+    let envelope = ResponseEnvelope::new(request_id, response);
+    stream.write_all(envelope.encode().as_bytes())?;
+    stream.write_all(b"\n")?;
+    stream.flush()
+}
+
+fn read_request(stream: &UnixStream) -> io::Result<Result<RequestEnvelope, ResponseError>> {
+    let mut request = String::new();
+    BufReader::new(stream.try_clone()?).read_line(&mut request)?;
+    match RequestEnvelope::decode(request.trim()) {
+        Ok(envelope) => Ok(Ok(envelope)),
+        Err(_) => Ok(Err(ResponseError::InvalidRequest)),
+    }
+}
+
+fn serve_stream_as(
+    stream: &mut UnixStream,
+    state: DaemonState,
+    authenticated_client: ClientKind,
+) -> io::Result<()> {
+    let envelope = match read_request(stream)? {
+        Ok(envelope) => envelope,
+        Err(error) => return write_response(stream, RequestId(0), Response::Error(error)),
+    };
+
+    if !envelope.is_compatible() {
+        return write_response(
+            stream,
+            envelope.request_id(),
+            Response::Error(ResponseError::UnsupportedProtocolVersion),
+        );
+    }
+    if !envelope.is_authorized_as(authenticated_client) {
+        return write_response(
+            stream,
+            envelope.request_id(),
+            Response::Error(ResponseError::Unauthorized),
+        );
+    }
+
+    write_response(
+        stream,
+        envelope.request_id(),
+        response_for(envelope.request(), state),
+    )
+}
+
+fn serve_stream_with_peer_policy(
+    stream: &mut UnixStream,
+    state: DaemonState,
+    policy: &PeerPolicy,
+) -> io::Result<()> {
+    let envelope = match read_request(stream)? {
+        Ok(envelope) => envelope,
+        Err(error) => return write_response(stream, RequestId(0), Response::Error(error)),
+    };
+
+    if !envelope.is_compatible() {
+        return write_response(
+            stream,
+            envelope.request_id(),
+            Response::Error(ResponseError::UnsupportedProtocolVersion),
+        );
+    }
+    if !policy.authenticate(stream, envelope.client()) {
+        return write_response(
+            stream,
+            envelope.request_id(),
+            Response::Error(ResponseError::PeerAuthenticationFailed),
+        );
+    }
+    if !envelope.is_authorized_as(envelope.client()) {
+        return write_response(
+            stream,
+            envelope.request_id(),
+            Response::Error(ResponseError::Unauthorized),
+        );
+    }
+
+    write_response(
+        stream,
+        envelope.request_id(),
+        response_for(envelope.request(), state),
+    )
+}
+
+fn bind_test_socket(socket_path: &Path) -> io::Result<UnixListener> {
     if socket_path.exists() {
         fs::remove_file(socket_path)?;
     }
+    UnixListener::bind(socket_path)
+}
+
+fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
+    if socket_path.exists() {
+        fs::remove_file(socket_path)?;
+    }
+    if let Some(parent) = socket_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
 
     let listener = UnixListener::bind(socket_path)?;
+    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))?;
+    chown(socket_path, Some(Uid::from_raw(policy.allowed_uid)), None)
+        .map_err(io::Error::other)?;
+    Ok(listener)
+}
+
+/// Serves one authenticated CLI request for integration tests and then exits.
+///
+/// # Errors
+///
+/// Returns an I/O error when the socket cannot be created or the request cannot be served.
+pub fn serve_once(socket_path: &Path, state: DaemonState) -> io::Result<()> {
+    let listener = bind_test_socket(socket_path)?;
     let (mut stream, _) = listener.accept()?;
-    let mut request = String::new();
-    BufReader::new(stream.try_clone()?).read_line(&mut request)?;
+    serve_stream_as(&mut stream, state, ClientKind::Cli)
+}
 
-    let response = handle_line(request.trim(), state);
-    stream.write_all(response.as_bytes())?;
-    stream.flush()?;
+/// Serves one request while authenticating the real Unix peer credentials.
+///
+/// # Errors
+///
+/// Returns an I/O error when the socket cannot be created, ownership cannot be applied,
+/// or the request cannot be served.
+pub fn serve_once_with_peer_policy(
+    socket_path: &Path,
+    state: DaemonState,
+    policy: &PeerPolicy,
+) -> io::Result<()> {
+    let listener = bind_production_socket(socket_path, policy)?;
+    let (mut stream, _) = listener.accept()?;
+    serve_stream_with_peer_policy(&mut stream, state, policy)
+}
+
+/// Runs the persistent production Unix-socket server.
+///
+/// Each connection is authenticated independently. Malformed or unauthenticated
+/// clients receive an error response and do not terminate the daemon loop.
+///
+/// # Errors
+///
+/// Returns an I/O error if the listening socket cannot be created or configured.
+pub fn serve_forever(
+    socket_path: &Path,
+    state: DaemonState,
+    policy: &PeerPolicy,
+) -> io::Result<()> {
+    let listener = bind_production_socket(socket_path, policy)?;
+    for incoming in listener.incoming() {
+        let Ok(mut stream) = incoming else {
+            continue;
+        };
+        let _ = serve_stream_with_peer_policy(&mut stream, state, policy);
+    }
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ParsedCliRequest {
-    Plain(Request),
-    Vpn { request: Request, id: u128 },
-}
-
-fn parse_cli_request(line: &str) -> Result<ParsedCliRequest, &'static str> {
-    match line {
-        "status" => Ok(ParsedCliRequest::Plain(Request::GetStatus)),
-        "session" => Ok(ParsedCliRequest::Plain(Request::GetSession)),
-        "doctor" => Ok(ParsedCliRequest::Plain(Request::Doctor)),
-        "vpn list" => Ok(ParsedCliRequest::Plain(Request::GetVpnList)),
-        _ => {
-            let mut parts = line.split_whitespace();
-            let Some(vpn) = parts.next() else {
-                return Err("unsupported");
-            };
-            let Some(action) = parts.next() else {
-                return Err("unsupported");
-            };
-            let Some(id) = parts.next() else {
-                return Err("unsupported");
-            };
-
-            if parts.next().is_some() || vpn != "vpn" {
-                return Err("unsupported");
-            }
-
-            let request = match action {
-                "up" => Request::VpnUp,
-                "down" => Request::VpnDown,
-                _ => return Err("unsupported"),
-            };
-            let id = id.parse::<u128>().map_err(|_| "invalid-vpn-id")?;
-            Ok(ParsedCliRequest::Vpn { request, id })
-        }
-    }
-}
-
-fn handle_line(line: &str, state: DaemonState) -> String {
-    let parsed = match parse_cli_request(line) {
-        Ok(parsed) => parsed,
-        Err("invalid-vpn-id") => return "Error: invalid VPN id\n".to_owned(),
-        Err(_) => return "Error: unsupported request\n".to_owned(),
-    };
-
-    let request = match parsed {
-        ParsedCliRequest::Plain(request) | ParsedCliRequest::Vpn { request, .. } => request,
-    };
-    let envelope = RequestEnvelope::new(RequestId(0), ClientKind::Cli, request);
-    if !envelope.is_authorized() {
-        return "Error: unauthorized\n".to_owned();
-    }
-
-    match parsed {
-        ParsedCliRequest::Plain(Request::GetStatus) => {
-            format!("Focus daemon: running\nState: {}\n", state_name(state))
-        }
-        ParsedCliRequest::Plain(Request::GetSession) => {
-            format!("Session state: {}\n", state_name(state))
-        }
-        ParsedCliRequest::Plain(Request::Doctor) => "Doctor: daemon reachable\n".to_owned(),
-        ParsedCliRequest::Plain(Request::GetVpnList) => "VPNs: none configured\n".to_owned(),
-        ParsedCliRequest::Vpn {
-            request: Request::VpnUp,
-            id,
-        } => format!("VPN up requested: {id}\n"),
-        ParsedCliRequest::Vpn {
-            request: Request::VpnDown,
-            id,
-        } => format!("VPN down requested: {id}\n"),
-        _ => "Error: unsupported request\n".to_owned(),
-    }
-}
-
-const fn state_name(state: DaemonState) -> &'static str {
-    match state {
-        DaemonState::Idle => "Idle",
-        DaemonState::Preflight => "Preflight",
-        DaemonState::Arming => "Arming",
-        DaemonState::Locked => "Locked",
-        DaemonState::EmergencyPending => "EmergencyPending",
-        DaemonState::EmergencyAuthorized => "EmergencyAuthorized",
-        DaemonState::Ending => "Ending",
-        DaemonState::Recovering => "Recovering",
-        DaemonState::ProtectionFailure => "ProtectionFailure",
-    }
 }
