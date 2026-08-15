@@ -59,11 +59,7 @@ impl Schedule {
     ///
     /// Returns `None` when `interval_seconds` is zero.
     #[must_use]
-    pub const fn recurring(
-        id: ScheduleId,
-        first_at: u64,
-        interval_seconds: u64,
-    ) -> Option<Self> {
+    pub const fn recurring(id: ScheduleId, first_at: u64, interval_seconds: u64) -> Option<Self> {
         if interval_seconds == 0 {
             return None;
         }
@@ -121,9 +117,8 @@ impl Schedule {
                 let elapsed = now - due_at;
                 let skipped_intervals = elapsed / interval_seconds;
                 let advance = skipped_intervals.saturating_add(1);
-                self.next_due_at = Some(
-                    due_at.saturating_add(advance.saturating_mul(interval_seconds)),
-                );
+                self.next_due_at =
+                    Some(due_at.saturating_add(advance.saturating_mul(interval_seconds)));
                 self.status = ScheduleStatus::Pending;
             }
         }
