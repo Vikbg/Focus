@@ -16,8 +16,8 @@ fn run() -> std::io::Result<()> {
         return Ok(());
     }
 
-    let socket_path = env::var("FOCUS_SOCKET_PATH")
-        .unwrap_or_else(|_| focusctl::DEFAULT_SOCKET_PATH.to_owned());
+    let socket_path =
+        env::var("FOCUS_SOCKET_PATH").unwrap_or_else(|_| focusctl::DEFAULT_SOCKET_PATH.to_owned());
     let status = focusctl::status_at(Path::new(&socket_path))?;
     print!("{status}");
     Ok(())
