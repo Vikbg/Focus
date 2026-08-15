@@ -166,7 +166,7 @@ where
     let response = if is_read_only(&request) {
         response_for(request, snapshot_state(&snapshot))
     } else {
-        service.lock().await.handle(request)
+        service.lock().await.handle(request_id, request)
     };
 
     write_response(&mut stream, request_id, response).await
