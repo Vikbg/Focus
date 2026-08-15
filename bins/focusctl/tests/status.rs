@@ -6,12 +6,14 @@ use std::{
     thread,
 };
 
+use focus_protocol::{ClientKind, ProtocolState, Request, RequestEnvelope, Response, ResponseEnvelope};
+
 fn test_socket_path() -> PathBuf {
     std::env::temp_dir().join(format!("focusctl-status-{}.sock", std::process::id()))
 }
 
 #[test]
-fn status_reads_daemon_status_without_owning_security_state() {
+fn status_reads_typed_daemon_status_without_owning_security_state() {
     let socket_path = test_socket_path();
     let _ = fs::remove_file(&socket_path);
     let server_path = socket_path.clone();
@@ -23,10 +25,15 @@ fn status_reads_daemon_status_without_owning_security_state() {
         BufReader::new(stream.try_clone().unwrap())
             .read_line(&mut request)
             .unwrap();
-        assert_eq!(request, "status\n");
-        stream
-            .write_all(b"Focus daemon: running\nState: Idle\n")
-            .unwrap();
+        let envelope = RequestEnvelope::decode(request.trim()).unwrap();
+        assert_eq!(envelope.client(), ClientKind::Cli);
+        assert_eq!(envelope.request(), Request::GetStatus);
+        let response = ResponseEnvelope::new(
+            envelope.request_id(),
+            Response::Status(ProtocolState::Idle),
+        );
+        stream.write_all(response.encode().as_bytes()).unwrap();
+        stream.write_all(b"\n").unwrap();
     });
 
     while !socket_path.exists() {
