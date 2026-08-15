@@ -164,7 +164,7 @@ where
     let request_id = envelope.request_id();
     let request = envelope.into_request();
     let response = if is_read_only(&request) {
-        response_for(request, snapshot_state(&snapshot))
+        response_for(&request, snapshot_state(&snapshot))
     } else {
         service.lock().await.handle(request_id, request)
     };
