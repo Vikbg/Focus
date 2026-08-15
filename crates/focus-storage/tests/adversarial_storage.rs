@@ -167,7 +167,7 @@ fn sqlite_full_rejects_security_event_without_partial_row() {
         .unwrap();
     assert_eq!(configured, page_count);
 
-    let oversized = vec![0x5a; 2 * 1024 * 1024];
+    let oversized = vec![0x5a_u8; 2 * 1024 * 1024];
     let result = connection.execute(
         "INSERT INTO security_events(event_type, payload) VALUES(?1, ?2)",
         params!["oversized", oversized],
