@@ -56,7 +56,11 @@ impl From<io::Error> for ClockSampleError {
 ///
 /// Returns [`ClockSampleError::InvalidBootId`] when the UUID cannot be decoded.
 pub fn parse_boot_id(input: &str) -> Result<BootId, ClockSampleError> {
-    let compact: String = input.trim().chars().filter(|character| *character != '-').collect();
+    let compact: String = input
+        .trim()
+        .chars()
+        .filter(|character| *character != '-')
+        .collect();
     if compact.len() != 32 {
         return Err(ClockSampleError::InvalidBootId);
     }
