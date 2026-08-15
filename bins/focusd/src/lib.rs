@@ -183,7 +183,9 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
         None
     };
 
-    let event = if evaluation.clock_event() != EmergencyClockEvent::None {
+    let event = if evaluation.clock_event() == EmergencyClockEvent::None {
+        None
+    } else {
         let event_type = match evaluation.clock_event() {
             EmergencyClockEvent::None => unreachable!(),
             EmergencyClockEvent::WallClockAnomaly => "emergency_clock_wall_anomaly",
@@ -198,8 +200,6 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
         )
         .into_bytes();
         Some(SecurityEvent::new(event_type, payload))
-    } else {
-        None
     };
 
     store.persist_emergency_observation(&candidate, event.as_ref(), transition.as_ref())?;
