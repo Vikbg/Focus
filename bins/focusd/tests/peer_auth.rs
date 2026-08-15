@@ -1,6 +1,6 @@
 use std::{
     fs,
-    os::unix::net::UnixStream,
+    os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
@@ -8,7 +8,7 @@ use std::{
 };
 
 use focus_core::SessionState;
-use focusd::{PeerPolicy, serve_once_with_peer_policy};
+use focusd::{PeerPolicy, bind_production_socket, serve_once_with_peer_policy};
 
 fn temp_socket(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -80,6 +80,23 @@ fn daemon_fails_closed_when_configured_local_uid_cannot_own_socket() {
     let _ = fs::remove_file(socket);
 
     assert!(result.is_err());
+}
+
+#[test]
+fn second_daemon_cannot_replace_a_live_socket() {
+    let socket = temp_socket("already-live");
+    let first = UnixListener::bind(&socket).unwrap();
+    let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
+
+    let second = bind_production_socket(&socket, &policy);
+
+    assert!(second.is_err(), "second daemon replaced a live socket");
+    let client = UnixStream::connect(&socket).unwrap();
+    let (server, _) = first.accept().unwrap();
+    drop(client);
+    drop(server);
+    drop(first);
+    let _ = fs::remove_file(socket);
 }
 
 #[test]
