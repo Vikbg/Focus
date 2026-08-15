@@ -39,7 +39,11 @@ fn persisted_emergency_request_remains_bound_to_active_session() {
     let restored = store.emergency_request().unwrap().unwrap();
     assert_eq!(restored.session_id(), active.id());
     assert_eq!(
-        store.active_session().unwrap().unwrap().recovery_code_hash(),
+        store
+            .active_session()
+            .unwrap()
+            .unwrap()
+            .recovery_code_hash(),
         active.recovery_code_hash()
     );
 }
