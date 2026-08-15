@@ -145,10 +145,7 @@ async fn conflicting_concurrent_mutations_with_same_request_id_have_one_winner()
     let (winning_request, winning_response) = if responses.contains(&Response::VpnUpRequested(17)) {
         (Request::VpnUp { id: 17 }, Response::VpnUpRequested(17))
     } else {
-        (
-            Request::VpnDown { id: 17 },
-            Response::VpnDownRequested(17),
-        )
+        (Request::VpnDown { id: 17 }, Response::VpnDownRequested(17))
     };
     let replay_socket = socket.clone();
     let replay = tokio::task::spawn_blocking(move || {
