@@ -70,6 +70,26 @@ fn peer_with_unexpected_executable_is_rejected() {
 }
 
 #[test]
+fn peer_with_unconfigured_local_uid_is_rejected() {
+    let socket = temp_socket("wrong-uid");
+    let server_socket = socket.clone();
+    let executable = std::env::current_exe().unwrap();
+    let unexpected_uid = current_uid().wrapping_add(1);
+    let policy = PeerPolicy::new(unexpected_uid, executable);
+    let server = thread::spawn(move || {
+        serve_once_with_peer_policy(&server_socket, SessionState::Idle, &policy).unwrap();
+    });
+
+    wait_for_socket(&socket);
+
+    let response = focusctl::status_at(&socket).unwrap();
+    server.join().unwrap();
+    let _ = fs::remove_file(socket);
+
+    assert_eq!(response, "Error: peer authentication failed\n");
+}
+
+#[test]
 fn unauthenticated_peer_cannot_stall_daemon_before_sending_a_request() {
     let socket = temp_socket("stalled-rejected");
     let server_socket = socket.clone();
