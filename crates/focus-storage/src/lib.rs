@@ -9,6 +9,9 @@ use focus_core::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
+#[cfg(test)]
+mod adversarial_tests;
+
 const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// Error returned by the protected Focus store.
