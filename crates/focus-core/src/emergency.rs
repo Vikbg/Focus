@@ -336,8 +336,8 @@ impl EmergencyRequest {
             }
         };
 
-        let remaining_seconds = EMERGENCY_DELAY_SECONDS
-            .saturating_sub(self.timing.verified_elapsed_seconds);
+        let remaining_seconds =
+            EMERGENCY_DELAY_SECONDS.saturating_sub(self.timing.verified_elapsed_seconds);
         if remaining_seconds != 0 {
             return EmergencyEvaluation::new(
                 EmergencyDecision::Waiting { remaining_seconds },
