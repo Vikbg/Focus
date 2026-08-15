@@ -4,10 +4,12 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-use focus_core::{SessionId, SessionState};
+use focus_core::{BootId, EmergencyClockSample, EmergencyRequest, SessionId, SessionState};
 use focus_platform::{FakeBackend, GuardKind, PlatformBackend, PlatformFuture};
 use focus_storage::{FocusStore, SqliteStore};
 use focusd::recover_session;
+
+const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
 
 fn block_on_ready<F: Future>(future: F) -> F::Output {
     let waker = Waker::noop();
@@ -94,7 +96,7 @@ fn restart_from_locked_reenters_recovery_before_reporting_locked() {
 }
 
 #[test]
-fn restart_from_emergency_pending_rearms_before_restoring_pending_state() {
+fn restart_from_emergency_pending_rearms_without_losing_pending_identity() {
     let mut store = SqliteStore::open_in_memory().unwrap();
     let mut backend = RecordingBackend::default();
     let session_id = SessionId(87);
@@ -110,7 +112,32 @@ fn restart_from_emergency_pending_rearms_before_restoring_pending_state() {
         store.active_session().unwrap().unwrap().state(),
         SessionState::EmergencyPending
     );
-    assert_eq!(store.transition_count().unwrap(), 2);
+    assert_eq!(store.transition_count().unwrap(), 0);
+}
+
+#[test]
+fn recovering_session_ignores_stale_emergency_request_from_previous_session() {
+    let mut store = SqliteStore::open_in_memory().unwrap();
+    let stale = EmergencyRequest::new(
+        "Old emergency",
+        EmergencyClockSample::new(BootId(1), 100, 1_000),
+        CODE,
+    )
+    .unwrap();
+    store.persist_emergency_request(&stale).unwrap();
+    store
+        .set_active_session(SessionId(88), SessionState::Recovering)
+        .unwrap();
+    let mut backend = RecordingBackend::default();
+
+    let state = block_on_ready(recover_session(&mut store, &mut backend)).unwrap();
+
+    assert_eq!(state, SessionState::Locked);
+    assert_complete_recovery(&backend);
+    assert_eq!(
+        store.active_session().unwrap().unwrap().state(),
+        SessionState::Locked
+    );
 }
 
 #[test]
