@@ -81,8 +81,7 @@ async fn read_request(
                 let Ok(line) = std::str::from_utf8(&frame) else {
                     return Ok(Err(ResponseError::InvalidRequest));
                 };
-                return Ok(RequestEnvelope::decode(line)
-                    .map_err(|_| ResponseError::InvalidRequest));
+                return Ok(RequestEnvelope::decode(line).map_err(|_| ResponseError::InvalidRequest));
             }
 
             if frame.len() + count > MAX_FRAME_BYTES {
