@@ -89,3 +89,24 @@ fn arming_refuses_to_replace_an_existing_active_session() {
     assert_eq!(active.state(), SessionState::Locked);
     assert_eq!(active.policy_sha256(), existing.policy_sha256());
 }
+
+#[test]
+fn arming_rejects_invalid_source_state_before_persistence_or_platform_effects() {
+    let mut store = SqliteStore::open_in_memory().unwrap();
+    let mut backend = FakeBackend::default();
+    let invalid = stored_session(102, SessionState::Locked);
+
+    let result = block_on_ready(arm_session(&mut store, &mut backend, &invalid));
+
+    assert!(matches!(result, Err(ArmError::Transition(_))));
+    assert!(store.active_session().unwrap().is_none());
+    assert!(backend.armed().is_empty());
+    for guard in [
+        GuardKind::Process,
+        GuardKind::Network,
+        GuardKind::Browser,
+        GuardKind::Privilege,
+    ] {
+        assert!(!backend.guard_is_armed(guard));
+    }
+}
