@@ -140,7 +140,7 @@ where
 ///
 /// Arming is first persisted as Recovering. Critical guards are then reapplied and
 /// verified. Healthy enforcement advances to Locked. Any platform failure advances
-/// to ProtectionFailure so the failure survives another restart.
+/// to `ProtectionFailure` so the failure survives another restart.
 ///
 /// Existing stable states are returned unchanged, and a missing active session is
 /// treated as Idle.
