@@ -1,4 +1,8 @@
-use std::{future::Future, pin::pin, task::{Context, Poll, Waker}};
+use std::{
+    future::Future,
+    pin::pin,
+    task::{Context, Poll, Waker},
+};
 
 use focus_core::{
     Decision, PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId,
@@ -48,7 +52,10 @@ fn failure_while_arming_compensates_previously_armed_guards_in_reverse_order() {
 
     assert!(result.is_err());
     assert_eq!(backend.armed(), &[GuardKind::Process, GuardKind::Network]);
-    assert_eq!(backend.disarmed(), &[GuardKind::Network, GuardKind::Process]);
+    assert_eq!(
+        backend.disarmed(),
+        &[GuardKind::Network, GuardKind::Process]
+    );
     assert_eq!(
         store.active_session().unwrap().unwrap().state(),
         SessionState::ProtectionFailure
