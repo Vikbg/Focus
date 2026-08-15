@@ -176,11 +176,7 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
     let transition = if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure {
         store.active_session()?.and_then(|active| {
             (active.state() != SessionState::ProtectionFailure).then(|| {
-                Transition::new(
-                    active.id(),
-                    active.state(),
-                    SessionState::ProtectionFailure,
-                )
+                Transition::new(active.id(), active.state(), SessionState::ProtectionFailure)
             })
         })
     } else {
