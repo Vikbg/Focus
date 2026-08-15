@@ -5,7 +5,7 @@ use std::{
 };
 
 use focus_storage::{FocusStore, MutationReservation, SecurityEvent, SqliteStore};
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 
 fn temp_db(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -147,6 +147,40 @@ fn read_only_database_cannot_accept_security_writes() {
     cleanup_db(&path);
 
     assert!(failed_closed, "read-only database accepted a security write");
+}
+
+#[test]
+fn sqlite_full_rejects_security_event_without_partial_row() {
+    let path = temp_db("full");
+    drop(SqliteStore::open(&path).unwrap());
+
+    let connection = Connection::open(&path).unwrap();
+    let page_count: i64 = connection
+        .query_row("PRAGMA page_count", [], |row| row.get(0))
+        .unwrap();
+    let configured: i64 = connection
+        .query_row(
+            &format!("PRAGMA max_page_count = {page_count}"),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(configured, page_count);
+
+    let oversized = vec![0x5a; 2 * 1024 * 1024];
+    let result = connection.execute(
+        "INSERT INTO security_events(event_type, payload) VALUES(?1, ?2)",
+        params!["oversized", oversized],
+    );
+    assert!(result.is_err(), "SQLite full condition accepted the event");
+
+    let count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM security_events", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "failed full write left a partial journal row");
+
+    drop(connection);
+    cleanup_db(&path);
 }
 
 #[test]
