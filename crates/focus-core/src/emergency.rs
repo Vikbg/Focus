@@ -17,6 +17,7 @@ pub enum EmergencyState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmergencyError {
     EmptyReason,
+    EmptyRecoveryCode,
 }
 
 /// Decision returned when evaluating a pending emergency unlock request.
@@ -68,12 +69,17 @@ impl EmergencyRequest {
     /// # Errors
     ///
     /// Returns [`EmergencyError::EmptyReason`] when the supplied reason contains no
-    /// non-whitespace characters.
+    /// non-whitespace characters, or [`EmergencyError::EmptyRecoveryCode`] when the
+    /// supplied recovery code contains no non-whitespace characters.
     pub fn new(
         reason: &str,
         requested_at: u64,
         recovery_code: &str,
     ) -> Result<Self, EmergencyError> {
+        if recovery_code.trim().is_empty() {
+            return Err(EmergencyError::EmptyRecoveryCode);
+        }
+
         Self::restore(
             reason.to_owned(),
             requested_at,
