@@ -1,6 +1,10 @@
-use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
-use focus_core::{EmergencyDecision, EmergencyRequest, EMERGENCY_DELAY_SECONDS};
+use focus_core::{EMERGENCY_DELAY_SECONDS, EmergencyDecision, EmergencyRequest};
 use focus_storage::{FocusStore, SecurityEvent, SqliteStore};
 
 fn temp_database(name: &str) -> PathBuf {
