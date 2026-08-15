@@ -1,8 +1,10 @@
 //! Privileged Focus daemon service primitives.
 
 mod linux_emergency;
+mod runtime;
 mod service;
 
+pub use runtime::DaemonRuntime;
 pub use service::{DaemonService, DaemonSnapshot, ProtectionHealth};
 
 use std::{

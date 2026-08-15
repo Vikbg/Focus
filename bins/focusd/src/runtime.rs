@@ -21,7 +21,8 @@ use tokio::{
 };
 
 use crate::{
-    DaemonService, DaemonSnapshot, IPC_READ_TIMEOUT, PeerPolicy, bind_production_socket, response_for,
+    DaemonService, DaemonSnapshot, IPC_READ_TIMEOUT, PeerPolicy, bind_production_socket,
+    response_for,
 };
 
 fn authenticate_peer(policy: &PeerPolicy, stream: &UnixStream) -> bool {
@@ -57,7 +58,9 @@ async fn write_response(
     stream.flush().await
 }
 
-async fn read_request(stream: &mut UnixStream) -> io::Result<Result<RequestEnvelope, ResponseError>> {
+async fn read_request(
+    stream: &mut UnixStream,
+) -> io::Result<Result<RequestEnvelope, ResponseError>> {
     let mut request = String::new();
     let read = {
         let mut reader = BufReader::new(&mut *stream);
