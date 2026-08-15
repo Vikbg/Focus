@@ -57,7 +57,11 @@ impl EmergencyRequest {
     ///
     /// Returns [`EmergencyError::EmptyReason`] when the supplied reason contains no
     /// non-whitespace characters.
-    pub fn new(reason: &str, requested_at: u64, recovery_code: &str) -> Result<Self, EmergencyError> {
+    pub fn new(
+        reason: &str,
+        requested_at: u64,
+        recovery_code: &str,
+    ) -> Result<Self, EmergencyError> {
         Self::restore(
             reason.to_owned(),
             requested_at,
