@@ -5,9 +5,7 @@ use std::{
 };
 
 use focus_core::{SessionId, SessionState};
-use focus_platform::{
-    FakeBackend, GuardKind, PlatformBackend, PlatformFuture, PlatformResult,
-};
+use focus_platform::{FakeBackend, GuardKind, PlatformBackend, PlatformFuture};
 use focus_storage::{FocusStore, SqliteStore};
 use focusd::recover_session;
 
