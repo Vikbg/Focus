@@ -6,6 +6,7 @@ use std::{
 
 use focus_core::{EMERGENCY_DELAY_SECONDS, EmergencyDecision, EmergencyRequest};
 use focus_storage::{FocusStore, SecurityEvent, SqliteStore};
+use rusqlite::Connection;
 
 fn temp_database(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -52,4 +53,20 @@ fn emergency_request_survives_database_reopen_with_original_deadline() {
         restored.evaluate(5_000 + EMERGENCY_DELAY_SECONDS, CODE),
         EmergencyDecision::Authorized
     );
+}
+
+#[test]
+fn migration_failure_is_reported_without_panicking() {
+    let path = temp_database("bad-migration");
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("CREATE VIEW active_session AS SELECT 1 AS singleton;")
+            .unwrap();
+    }
+
+    let result = SqliteStore::open(&path);
+    let _ = fs::remove_file(&path);
+
+    assert!(result.is_err());
 }
