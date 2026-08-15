@@ -131,13 +131,16 @@ fn restart_from_emergency_pending_rearms_without_losing_pending_identity() {
 #[test]
 fn recovering_session_ignores_stale_emergency_request_from_previous_session() {
     let mut store = SqliteStore::open_in_memory().unwrap();
+    let previous_session = stored_session(87, SessionState::EmergencyPending);
+    store.set_active_session(&previous_session).unwrap();
     let previous_request = EmergencyRequest::new(
+        previous_session.id(),
         "Old emergency",
         EmergencyClockSample::new(BootId(1), 100, 1_000),
-        CODE,
     )
     .unwrap();
     store.persist_emergency_request(&previous_request).unwrap();
+
     let session = stored_session(88, SessionState::Recovering);
     store.set_active_session(&session).unwrap();
     let mut backend = RecordingBackend::default();
