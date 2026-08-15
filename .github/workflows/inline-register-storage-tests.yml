@@ -1,0 +1,44 @@
+name: Register storage regression
+
+on:
+  push:
+    branches:
+      - "agent/audit-remediation-inline"
+    paths:
+      - ".github/workflows/inline-register-storage-tests.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: agent/audit-remediation-inline
+          fetch-depth: 0
+
+      - name: Register internal test module
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/focus-storage/src/lib.rs")
+          text = path.read_text(encoding="utf-8")
+          marker = "use rusqlite::{Connection, OptionalExtension, params};\n"
+          insertion = marker + "\n#[cfg(test)]\nmod adversarial_tests;\n"
+          if "mod adversarial_tests;" not in text:
+              if marker not in text:
+                  raise SystemExit("rusqlite import marker not found")
+              text = text.replace(marker, insertion, 1)
+              path.write_text(text, encoding="utf-8")
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/focus-storage/src/lib.rs
+          git diff --cached --quiet && exit 0
+          git commit -m "test: register internal sqlite full regression"
+          git push origin HEAD:agent/audit-remediation-inline
