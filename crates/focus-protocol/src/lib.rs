@@ -25,6 +25,10 @@ pub enum Request {
     RequestEmergencyUnlock,
     SubmitEmergencyCode,
     GetProfiles,
+    Doctor,
+    GetVpnList,
+    VpnUp,
+    VpnDown,
 }
 
 impl Request {
