@@ -1,29 +1,34 @@
+use focus_core::ProfileId;
 use focus_protocol::{
     ClientKind, PROTOCOL_VERSION, ProtocolState, Request, RequestEnvelope, RequestId, Response,
-    ResponseEnvelope,
+    ResponseEnvelope, StartSessionRequest,
 };
+
+fn start_session() -> Request {
+    Request::StartSession(StartSessionRequest {
+        profile_id: ProfileId(7),
+        minimum_duration_secs: 3_600,
+        objective: "Deep work".to_owned(),
+    })
+}
 
 #[test]
 fn browser_bridge_cannot_start_sessions() {
-    let request = RequestEnvelope::new(
-        RequestId(1),
-        ClientKind::BrowserBridge,
-        Request::StartSession,
-    );
+    let request = RequestEnvelope::new(RequestId(1), ClientKind::BrowserBridge, start_session());
 
     assert!(!request.is_authorized());
 }
 
 #[test]
 fn desktop_can_start_sessions() {
-    let request = RequestEnvelope::new(RequestId(2), ClientKind::Desktop, Request::StartSession);
+    let request = RequestEnvelope::new(RequestId(2), ClientKind::Desktop, start_session());
 
     assert!(request.is_authorized());
 }
 
 #[test]
 fn cli_cannot_start_sessions() {
-    let request = RequestEnvelope::new(RequestId(3), ClientKind::Cli, Request::StartSession);
+    let request = RequestEnvelope::new(RequestId(3), ClientKind::Cli, start_session());
 
     assert!(!request.is_authorized());
 }
