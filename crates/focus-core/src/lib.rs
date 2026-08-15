@@ -11,8 +11,9 @@ mod vpn;
 
 pub use decision::{BlockReason, Decision};
 pub use emergency::{
-    EMERGENCY_DELAY_SECONDS, EmergencyDecision, EmergencyError, EmergencyRequest, EmergencyState,
-    RecoveryCodeHash,
+    BootId, EMERGENCY_DELAY_SECONDS, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision,
+    EmergencyError, EmergencyEvaluation, EmergencyRequest, EmergencyState, EmergencyTimingState,
+    RecoveryCodeHash, WALL_CLOCK_DRIFT_TOLERANCE_SECONDS,
 };
 pub use policy::{DecisionContext, PolicyEngine, PolicySet};
 pub use profile::{PolicyVersion, Profile, ProfileId, SessionPolicySnapshot};
