@@ -391,9 +391,9 @@ impl ResponseEnvelope {
             "session" => Response::Session(ProtocolState::parse(parts[3])?),
             "doctor" if parts[3] == "reachable" => Response::DoctorReachable,
             "vpn-list" if parts[3] == "empty" => Response::VpnListEmpty,
-            "vpn-up" => Response::VpnUpRequested(
-                parts[3].parse().map_err(|_| WireError::InvalidArgument)?,
-            ),
+            "vpn-up" => {
+                Response::VpnUpRequested(parts[3].parse().map_err(|_| WireError::InvalidArgument)?)
+            }
             "vpn-down" => Response::VpnDownRequested(
                 parts[3].parse().map_err(|_| WireError::InvalidArgument)?,
             ),
