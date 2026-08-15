@@ -175,16 +175,15 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
     let evaluation = request.evaluate(clock, recovery_code);
     store.persist_emergency_request(request)?;
 
-    if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure {
-        if let Some(active) = store.active_session()? {
-            if active.state() != SessionState::ProtectionFailure {
-                store.persist_transition(&Transition::new(
-                    active.id(),
-                    active.state(),
-                    SessionState::ProtectionFailure,
-                ))?;
-            }
-        }
+    if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure
+        && let Some(active) = store.active_session()?
+        && active.state() != SessionState::ProtectionFailure
+    {
+        store.persist_transition(&Transition::new(
+            active.id(),
+            active.state(),
+            SessionState::ProtectionFailure,
+        ))?;
     }
 
     if evaluation.clock_event() != EmergencyClockEvent::None {
