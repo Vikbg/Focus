@@ -8,12 +8,13 @@ use std::{
 
 use focus_platform::PlatformBackend;
 use focus_protocol::{
-    ClientKind, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope, ResponseError,
+    ClientKind, MAX_FRAME_BYTES, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope,
+    ResponseError,
 };
 use focus_storage::FocusStore;
 use nix::sys::socket::{getsockopt, sockopt::PeerCredentials};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{UnixListener, UnixStream},
     sync::Mutex,
     task::JoinSet,
@@ -61,18 +62,38 @@ async fn write_response(
 async fn read_request(
     stream: &mut UnixStream,
 ) -> io::Result<Result<RequestEnvelope, ResponseError>> {
-    let mut request = String::new();
-    let read = {
-        let mut reader = BufReader::new(&mut *stream);
-        timeout(IPC_READ_TIMEOUT, reader.read_line(&mut request)).await
+    let operation = async {
+        let mut frame = Vec::with_capacity(1024);
+        let mut chunk = [0_u8; 1024];
+
+        loop {
+            let count = stream.read(&mut chunk).await?;
+            if count == 0 {
+                return Ok(Err(ResponseError::InvalidRequest));
+            }
+
+            let received = &chunk[..count];
+            if let Some(newline) = received.iter().position(|byte| *byte == b'\n') {
+                if frame.len() + newline > MAX_FRAME_BYTES {
+                    return Ok(Err(ResponseError::InvalidRequest));
+                }
+                frame.extend_from_slice(&received[..newline]);
+                let Ok(line) = std::str::from_utf8(&frame) else {
+                    return Ok(Err(ResponseError::InvalidRequest));
+                };
+                return Ok(RequestEnvelope::decode(line)
+                    .map_err(|_| ResponseError::InvalidRequest));
+            }
+
+            if frame.len() + count > MAX_FRAME_BYTES {
+                return Ok(Err(ResponseError::InvalidRequest));
+            }
+            frame.extend_from_slice(received);
+        }
     };
 
-    match read {
-        Ok(Ok(_)) => match RequestEnvelope::decode(request.trim()) {
-            Ok(envelope) => Ok(Ok(envelope)),
-            Err(_) => Ok(Err(ResponseError::InvalidRequest)),
-        },
-        Ok(Err(error)) => Err(error),
+    match timeout(IPC_READ_TIMEOUT, operation).await {
+        Ok(result) => result,
         Err(_) => Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "authenticated IPC peer exceeded the read timeout",
