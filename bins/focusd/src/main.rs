@@ -7,11 +7,10 @@ use std::{
 
 use focus_platform::FailClosedBackend;
 use focus_storage::SqliteStore;
-use focusd::{DaemonRuntime, DaemonService, PeerPolicy};
+use focusd::{DaemonRuntime, DaemonService, PeerPolicy, RuntimeConfig};
 
 const DEFAULT_DB_PATH: &str = "/var/lib/focus/focus.db";
 const DEFAULT_SOCKET_PATH: &str = "/run/focus/focusd.sock";
-const DEFAULT_CLI_PATH: &str = "/usr/bin/focusctl";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -27,12 +26,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let socket_path = PathBuf::from(
         env::var("FOCUS_SOCKET_PATH").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_owned()),
     );
-    let cli_path =
-        PathBuf::from(env::var("FOCUS_CLI_PATH").unwrap_or_else(|_| DEFAULT_CLI_PATH.to_owned()));
-    let allowed_uid = match env::var("FOCUS_ALLOWED_UID") {
-        Ok(value) => value.parse::<u32>()?,
-        Err(_) => nix::unistd::geteuid().as_raw(),
-    };
+    let runtime_config = RuntimeConfig::from_env()?;
 
     create_parent(&database_path)?;
     let store = SqliteStore::open(&database_path)?;
@@ -41,7 +35,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
     service.recover().await?;
 
     let runtime = DaemonRuntime::new(service);
-    let peer_policy = PeerPolicy::new(allowed_uid, cli_path);
+    let peer_policy = PeerPolicy::new(
+        runtime_config.allowed_uid(),
+        runtime_config.cli_executable().to_path_buf(),
+    );
     runtime
         .serve_until(&socket_path, &peer_policy, async {
             let _ = tokio::signal::ctrl_c().await;
