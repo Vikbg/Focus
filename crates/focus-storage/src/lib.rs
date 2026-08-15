@@ -9,7 +9,7 @@ use focus_core::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// Error returned by the protected Focus store.
 #[derive(Debug)]
@@ -108,6 +108,14 @@ impl From<rusqlite::Error> for StoreError {
 
 /// Result returned by protected-store operations.
 pub type StoreResult<T> = Result<T, StoreError>;
+
+/// Durable reservation state for one at-most-once mutation request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MutationReservation {
+    Started,
+    InProgress,
+    Completed(Vec<u8>),
+}
 
 /// Security-relevant event appended to the protected local journal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -275,6 +283,20 @@ pub trait FocusStore {
     /// Returns an error if persisted emergency state is incomplete or invalid.
     fn emergency_request(&self) -> StoreResult<Option<EmergencyRequest>>;
 
+    /// Atomically reserves one mutation request identifier before any effect executes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the replay ledger cannot be queried or updated.
+    fn reserve_mutation(&mut self, request_id: u128) -> StoreResult<MutationReservation>;
+
+    /// Marks one previously reserved mutation as complete and stores its replay response.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request was never reserved or persistence fails.
+    fn complete_mutation(&mut self, request_id: u128, response: &[u8]) -> StoreResult<()>;
+
     /// Returns the number of committed state transitions.
     ///
     /// # Errors
@@ -354,6 +376,11 @@ impl SqliteStore {
 
         if version == Some(2) {
             self.migrate_v2_to_v3()?;
+            version = Some(3);
+        }
+
+        if version == Some(3) {
+            self.migrate_v3_to_v4()?;
         }
 
         self.validate_current_schema()
@@ -447,6 +474,22 @@ impl SqliteStore {
         Ok(())
     }
 
+    fn migrate_v3_to_v4(&mut self) -> StoreResult<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            "
+            CREATE TABLE mutation_requests (
+                request_id TEXT PRIMARY KEY,
+                status INTEGER NOT NULL CHECK (status IN (0, 1)),
+                response BLOB
+            );
+            INSERT INTO schema_migrations(version) VALUES(4);
+            ",
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn validate_current_schema(&self) -> StoreResult<()> {
         self.validate_table_columns(
             "active_session",
@@ -492,6 +535,7 @@ impl SqliteStore {
                 "verified_elapsed",
             ],
         )?;
+        self.validate_table_columns("mutation_requests", &["request_id", "status", "response"])?;
         self.validate_table_columns("schema_migrations", &["version"])?;
         Ok(())
     }
@@ -789,6 +833,60 @@ impl FocusStore for SqliteStore {
         )
         .map(Some)
         .map_err(|_| StoreError::InvalidEmergencyRequest)
+    }
+
+    fn reserve_mutation(&mut self, request_id: u128) -> StoreResult<MutationReservation> {
+        let encoded_request_id = format!("{request_id:032x}");
+        let transaction = self.connection.transaction()?;
+        let existing = transaction
+            .query_row(
+                "SELECT status, response FROM mutation_requests WHERE request_id = ?1",
+                params![encoded_request_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
+            )
+            .optional()?;
+
+        let reservation = match existing {
+            None => {
+                transaction.execute(
+                    "INSERT INTO mutation_requests(request_id, status, response) VALUES(?1, 0, NULL)",
+                    params![encoded_request_id],
+                )?;
+                MutationReservation::Started
+            }
+            Some((0, None)) => MutationReservation::InProgress,
+            Some((1, Some(response))) => MutationReservation::Completed(response),
+            Some(_) => return Err(StoreError::SchemaMismatch("mutation_requests".to_owned())),
+        };
+
+        transaction.commit()?;
+        Ok(reservation)
+    }
+
+    fn complete_mutation(&mut self, request_id: u128, response: &[u8]) -> StoreResult<()> {
+        let encoded_request_id = format!("{request_id:032x}");
+        let transaction = self.connection.transaction()?;
+        let existing = transaction
+            .query_row(
+                "SELECT status, response FROM mutation_requests WHERE request_id = ?1",
+                params![encoded_request_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
+            )
+            .optional()?;
+
+        match existing {
+            Some((0, None)) => {
+                transaction.execute(
+                    "UPDATE mutation_requests SET status = 1, response = ?2 WHERE request_id = ?1",
+                    params![encoded_request_id, response],
+                )?;
+            }
+            Some((1, Some(stored))) if stored == response => {}
+            _ => return Err(StoreError::StateMismatch),
+        }
+
+        transaction.commit()?;
+        Ok(())
     }
 
     fn transition_count(&self) -> StoreResult<u64> {

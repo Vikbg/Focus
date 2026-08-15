@@ -63,6 +63,13 @@ pub struct EmergencyCodePayload {
     pub code: String,
 }
 
+/// Replay semantics required for one request class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayPolicy {
+    Repeatable,
+    AtMostOnce,
+}
+
 /// Request set supported by the Focus daemon protocol.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
@@ -79,6 +86,23 @@ pub enum Request {
 }
 
 impl Request {
+    /// Returns the replay semantics required for this request class.
+    #[must_use]
+    pub const fn replay_policy(&self) -> ReplayPolicy {
+        match self {
+            Self::GetStatus
+            | Self::GetSession
+            | Self::GetProfiles
+            | Self::Doctor
+            | Self::GetVpnList => ReplayPolicy::Repeatable,
+            Self::StartSession(_)
+            | Self::RequestEmergencyUnlock(_)
+            | Self::SubmitEmergencyCode(_)
+            | Self::VpnUp { .. }
+            | Self::VpnDown { .. } => ReplayPolicy::AtMostOnce,
+        }
+    }
+
     const fn allowed_for(&self, client: ClientKind) -> bool {
         match client {
             ClientKind::Desktop => true,
