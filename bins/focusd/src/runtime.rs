@@ -128,14 +128,7 @@ where
     S: FocusStore + Send + 'static,
     B: PlatformBackend + Send + 'static,
 {
-    serve_connection_as(
-        stream,
-        service,
-        snapshot,
-        policy,
-        ClientKind::Cli,
-    )
-    .await
+    serve_connection_as(stream, service, snapshot, policy, ClientKind::Cli).await
 }
 
 async fn serve_connection_as<S, B>(
@@ -317,7 +310,10 @@ mod tests {
     }
 
     async fn exchange(mut client: UnixStream, envelope: RequestEnvelope) -> Response {
-        client.write_all(envelope.encode().as_bytes()).await.unwrap();
+        client
+            .write_all(envelope.encode().as_bytes())
+            .await
+            .unwrap();
         client.write_all(b"\n").await.unwrap();
         client.flush().await.unwrap();
 
