@@ -48,14 +48,22 @@ fn network_guard_failure_prevents_locked_state() {
     backend.fail_guard(GuardKind::Network);
     let session = stored_session(42, SessionState::Arming);
 
-    let result = block_on_ready(arm_session(&mut store, &mut backend, &session));
+    let error = block_on_ready(arm_session(&mut store, &mut backend, &session)).unwrap_err();
 
     assert!(matches!(
-        result,
-        Err(ArmError::Platform(PlatformError::GuardFailed(
-            GuardKind::Network
-        )))
+        error,
+        ArmError::ArmingFailed {
+            source: PlatformError::GuardFailed(GuardKind::Network),
+            ..
+        }
     ));
+    assert!(
+        error
+            .compensation_report()
+            .unwrap()
+            .remaining_guards()
+            .is_empty()
+    );
 
     let active = store.active_session().unwrap().unwrap();
     assert_eq!(active.id(), session.id());
