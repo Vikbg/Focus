@@ -40,6 +40,18 @@ impl RecoveryCodeHash {
         bytes.copy_from_slice(&digest);
         Self(bytes)
     }
+
+    /// Restores a fingerprint from its fixed-width persisted representation.
+    #[must_use]
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the fixed-width persisted representation of this fingerprint.
+    #[must_use]
+    pub const fn to_bytes(self) -> [u8; 32] {
+        self.0
+    }
 }
 
 /// Persistent emergency unlock request.
