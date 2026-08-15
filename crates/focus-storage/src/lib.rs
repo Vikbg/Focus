@@ -100,11 +100,8 @@ pub trait FocusStore {
     /// # Errors
     ///
     /// Returns an error when the database write fails.
-    fn set_active_session(
-        &mut self,
-        session_id: SessionId,
-        state: SessionState,
-    ) -> StoreResult<()>;
+    fn set_active_session(&mut self, session_id: SessionId, state: SessionState)
+    -> StoreResult<()>;
 
     /// Atomically appends a transition and updates the active session.
     ///
