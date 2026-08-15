@@ -46,13 +46,9 @@ const IPC_READ_TIMEOUT: Duration = Duration::from_secs(2);
 /// Error returned while arming a protected Focus session.
 #[derive(Debug)]
 pub enum ArmError {
-    /// Another protected session is already persisted.
     ActiveSessionExists,
-    /// The protected store could not persist session state.
     Store(StoreError),
-    /// The requested lifecycle change was rejected by the authoritative state machine.
     Transition(TransitionError),
-    /// An operating-system enforcement operation failed.
     Platform(PlatformError),
 }
 
@@ -97,9 +93,7 @@ impl From<PlatformError> for ArmError {
 /// Error returned while recovering protected session state after daemon restart.
 #[derive(Debug)]
 pub enum RecoveryError {
-    /// The protected store could not be queried or updated.
     Store(StoreError),
-    /// The persisted lifecycle state cannot perform the required recovery transition.
     Transition(TransitionError),
 }
 
@@ -135,13 +129,14 @@ impl From<TransitionError> for RecoveryError {
     }
 }
 
-/// Error returned while evaluating and atomically persisting emergency timing evidence.
+/// Error returned while evaluating and atomically persisting emergency state.
 #[derive(Debug)]
 pub enum EmergencyUnlockError {
-    /// The protected store could not be queried or updated.
     Store(StoreError),
-    /// The required fail-closed lifecycle transition is not legal for persisted state.
     Transition(TransitionError),
+    NoActiveSession,
+    SessionMismatch,
+    InvalidSessionState(SessionState),
 }
 
 impl fmt::Display for EmergencyUnlockError {
@@ -149,6 +144,13 @@ impl fmt::Display for EmergencyUnlockError {
         match self {
             Self::Store(error) => write!(formatter, "emergency store error: {error}"),
             Self::Transition(error) => write!(formatter, "emergency transition error: {error:?}"),
+            Self::NoActiveSession => formatter.write_str("no active Focus session"),
+            Self::SessionMismatch => {
+                formatter.write_str("emergency request belongs to a different session")
+            }
+            Self::InvalidSessionState(state) => {
+                write!(formatter, "invalid session state for emergency unlock: {state:?}")
+            }
         }
     }
 }
@@ -157,7 +159,10 @@ impl Error for EmergencyUnlockError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Store(error) => Some(error),
-            Self::Transition(_) => None,
+            Self::Transition(_)
+            | Self::NoActiveSession
+            | Self::SessionMismatch
+            | Self::InvalidSessionState(_) => None,
         }
     }
 }
@@ -182,7 +187,6 @@ pub struct PeerPolicy {
 }
 
 impl PeerPolicy {
-    /// Creates a peer policy for one user and one canonical CLI executable.
     #[must_use]
     pub fn new(allowed_uid: u32, cli_executable: PathBuf) -> Self {
         Self {
@@ -221,40 +225,49 @@ fn transition_context(session: &StoredActiveSession) -> TransitionContext {
     )
 }
 
-/// Evaluates an emergency unlock observation, persists timing evidence, and handles anomalies.
+/// Evaluates an emergency unlock observation against the precommitted active-session hash.
 ///
-/// This low-level function accepts an explicit clock sample for deterministic tests and
-/// platform adapters. Production Linux code should call [`evaluate_linux_emergency_unlock`].
-/// Wall-clock and reboot events are journaled. A monotonic regression is treated as a
-/// clock-integrity failure and moves any active protected session to `ProtectionFailure`.
+/// Timing evidence, a clock-security event, and any first lifecycle transition are committed
+/// atomically. On successful authorization the session first enters `EmergencyAuthorized`,
+/// then advances to `Ending`. If the second transition is interrupted, restart recovery can
+/// safely continue from the explicitly authorized state.
 ///
 /// # Errors
 ///
-/// Returns an error if protected state cannot be persisted or if the authoritative state
-/// machine rejects the required fail-closed transition for the persisted lifecycle state.
+/// Returns an error if the request does not belong to the active pending session, protected
+/// state cannot be persisted, or the authoritative state machine rejects a required edge.
 pub fn evaluate_emergency_unlock<S: FocusStore>(
     store: &mut S,
     request: &mut EmergencyRequest,
     clock: EmergencyClockSample,
     recovery_code: &str,
 ) -> Result<EmergencyEvaluation, EmergencyUnlockError> {
-    let mut candidate = request.clone();
-    let evaluation = candidate.evaluate(clock, recovery_code);
+    let active = store
+        .active_session()?
+        .ok_or(EmergencyUnlockError::NoActiveSession)?;
+    if request.session_id() != active.id() {
+        return Err(EmergencyUnlockError::SessionMismatch);
+    }
+    if active.state() != SessionState::EmergencyPending {
+        return Err(EmergencyUnlockError::InvalidSessionState(active.state()));
+    }
 
-    let transition = if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure {
-        match store.active_session()? {
-            Some(active) if active.state() != SessionState::ProtectionFailure => {
-                let validated = SessionMachine::apply(
-                    active.state(),
-                    SessionEvent::ProtectionFailed,
-                    &transition_context(&active),
-                )?;
-                Some((active.id(), validated))
-            }
-            _ => None,
-        }
-    } else {
-        None
+    let context = transition_context(&active);
+    let mut candidate = request.clone();
+    let evaluation = candidate.evaluate(clock, active.recovery_code_hash(), recovery_code);
+
+    let transition = match evaluation.decision() {
+        EmergencyDecision::ClockIntegrityFailure => Some(SessionMachine::apply(
+            active.state(),
+            SessionEvent::ProtectionFailed,
+            &context,
+        )?),
+        EmergencyDecision::Authorized => Some(SessionMachine::apply(
+            active.state(),
+            SessionEvent::EmergencyAuthorized,
+            &context,
+        )?),
+        EmergencyDecision::Waiting { .. } | EmergencyDecision::InvalidCode => None,
     };
 
     let event = if evaluation.clock_event() == EmergencyClockEvent::None {
@@ -279,25 +292,28 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
     store.persist_emergency_observation(
         &candidate,
         event.as_ref(),
-        transition
-            .as_ref()
-            .map(|(session_id, validated)| (*session_id, validated)),
+        transition.as_ref().map(|validated| (active.id(), validated)),
     )?;
     *request = candidate;
+
+    if evaluation.decision() == EmergencyDecision::Authorized {
+        let ending = SessionMachine::apply(
+            SessionState::EmergencyAuthorized,
+            SessionEvent::EndRequested,
+            &context,
+        )?;
+        store.persist_transition(active.id(), &ending)?;
+    }
+
     Ok(evaluation)
 }
 
 /// Arms one Focus session and reports Locked only after all critical guards are healthy.
 ///
-/// The supplied active-session record already contains the versioned immutable policy,
-/// timing context, and precommitted recovery-code hash required for safe restart recovery.
-///
 /// # Errors
 ///
-/// Returns [`ArmError::ActiveSessionExists`] when protected state already contains
-/// an active session, [`ArmError::Store`] when state cannot be persisted,
-/// [`ArmError::Transition`] when the session record does not represent a valid arming state,
-/// or [`ArmError::Platform`] when platform preparation or enforcement fails.
+/// Returns an error if another session exists, persistence fails, the lifecycle state is
+/// invalid, or a required platform enforcement operation fails.
 pub async fn arm_session<S, B>(
     store: &mut S,
     backend: &mut B,
@@ -313,13 +329,11 @@ where
 
     backend.preflight().await?;
     store.set_active_session(session)?;
-
     backend.close_blocked_apps().await?;
 
     for guard in REQUIRED_GUARDS {
         backend.arm_guard(guard).await?;
     }
-
     for guard in REQUIRED_GUARDS {
         backend.verify_guard(guard).await?;
     }
@@ -330,23 +344,15 @@ where
         &transition_context(session),
     )?;
     store.persist_transition(session.id(), &transition)?;
-
     Ok(SessionState::Locked)
 }
 
 /// Recovers a persisted protected session after daemon restart.
 ///
-/// Persisted `Arming` and `Locked` sessions enter `Recovering` and may return to `Locked`
-/// only after all protections have been reapplied and verified. An `EmergencyPending`
-/// session keeps that identity while protections are reapplied, so another interruption
-/// cannot lose the pending emergency state. An interrupted `Recovering` state always targets
-/// `Locked`; stale emergency-request rows never select the recovery target. Any platform
-/// failure advances the active session to `ProtectionFailure`.
-///
 /// # Errors
 ///
-/// Returns [`RecoveryError::Store`] if protected state cannot be queried or updated, or
-/// [`RecoveryError::Transition`] if persisted state is inconsistent with the recovery graph.
+/// Returns an error if protected state cannot be queried or if persisted state is
+/// inconsistent with the authoritative recovery graph.
 pub async fn recover_session<S, B>(
     store: &mut S,
     backend: &mut B,
@@ -363,16 +369,17 @@ where
     let state = active.state();
     let context = transition_context(&active);
 
+    if state == SessionState::EmergencyAuthorized {
+        let ending = SessionMachine::apply(state, SessionEvent::EndRequested, &context)?;
+        store.persist_transition(session_id, &ending)?;
+        return Ok(SessionState::Ending);
+    }
+
     if state == SessionState::EmergencyPending {
         if restore_all_protections(backend).await {
             return Ok(SessionState::EmergencyPending);
         }
-
-        let failed = SessionMachine::apply(
-            SessionState::EmergencyPending,
-            SessionEvent::ProtectionFailed,
-            &context,
-        )?;
+        let failed = SessionMachine::apply(state, SessionEvent::ProtectionFailed, &context)?;
         store.persist_transition(session_id, &failed)?;
         return Ok(SessionState::ProtectionFailure);
     }
@@ -400,19 +407,16 @@ async fn restore_all_protections<B: PlatformBackend>(backend: &mut B) -> bool {
     if backend.preflight().await.is_err() || backend.close_blocked_apps().await.is_err() {
         return false;
     }
-
     for guard in REQUIRED_GUARDS {
         if backend.arm_guard(guard).await.is_err() {
             return false;
         }
     }
-
     for guard in REQUIRED_GUARDS {
         if backend.verify_guard(guard).await.is_err() {
             return false;
         }
     }
-
     true
 }
 
@@ -584,9 +588,6 @@ pub fn serve_once_with_peer_policy(
 }
 
 /// Runs the persistent production Unix-socket server.
-///
-/// Each connection is authenticated independently. Malformed or unauthenticated
-/// clients receive an error response and do not terminate the daemon loop.
 ///
 /// # Errors
 ///
