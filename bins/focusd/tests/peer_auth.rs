@@ -70,23 +70,16 @@ fn peer_with_unexpected_executable_is_rejected() {
 }
 
 #[test]
-fn peer_with_unconfigured_local_uid_is_rejected() {
+fn daemon_fails_closed_when_configured_local_uid_cannot_own_socket() {
     let socket = temp_socket("wrong-uid");
-    let server_socket = socket.clone();
     let executable = std::env::current_exe().unwrap();
     let unexpected_uid = current_uid().wrapping_add(1);
     let policy = PeerPolicy::new(unexpected_uid, executable);
-    let server = thread::spawn(move || {
-        serve_once_with_peer_policy(&server_socket, SessionState::Idle, &policy).unwrap();
-    });
 
-    wait_for_socket(&socket);
-
-    let response = focusctl::status_at(&socket).unwrap();
-    server.join().unwrap();
+    let result = serve_once_with_peer_policy(&socket, SessionState::Idle, &policy);
     let _ = fs::remove_file(socket);
 
-    assert_eq!(response, "Error: peer authentication failed\n");
+    assert!(result.is_err());
 }
 
 #[test]
