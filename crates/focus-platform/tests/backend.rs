@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-use focus_platform::{FakeBackend, GuardKind, PlatformBackend, PlatformError};
+use focus_platform::{FailClosedBackend, FakeBackend, GuardKind, PlatformBackend, PlatformError};
 
 fn block_on_ready<F: Future>(future: F) -> F::Output {
     let waker = Waker::noop();
@@ -13,7 +13,7 @@ fn block_on_ready<F: Future>(future: F) -> F::Output {
 
     match future.as_mut().poll(&mut context) {
         Poll::Ready(output) => output,
-        Poll::Pending => panic!("fake backend futures must resolve immediately"),
+        Poll::Pending => panic!("test backend futures must resolve immediately"),
     }
 }
 
@@ -43,5 +43,22 @@ fn fake_backend_can_fail_each_guard_independently() {
                 assert_eq!(block_on_ready(backend.arm_guard(other)), Ok(()));
             }
         }
+    }
+}
+
+#[test]
+fn fail_closed_backend_never_claims_a_guard_is_armed() {
+    let mut backend = FailClosedBackend;
+
+    for guard in [
+        GuardKind::Process,
+        GuardKind::Network,
+        GuardKind::Browser,
+        GuardKind::Privilege,
+    ] {
+        assert_eq!(
+            block_on_ready(backend.arm_guard(guard)),
+            Err(PlatformError::GuardFailed(guard))
+        );
     }
 }
