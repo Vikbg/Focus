@@ -2,6 +2,8 @@
 
 use sha2::{Digest, Sha256};
 
+use crate::SessionId;
+
 /// Mandatory delay before an emergency unlock can be authorized.
 pub const EMERGENCY_DELAY_SECONDS: u64 = 600;
 
@@ -172,7 +174,6 @@ pub enum EmergencyState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmergencyError {
     EmptyReason,
-    EmptyRecoveryCode,
     InvalidTimingState,
 }
 
@@ -247,34 +248,43 @@ impl RecoveryCodeHash {
     pub const fn to_bytes(self) -> [u8; 32] {
         self.0
     }
+
+    /// Compares a candidate recovery code with this precommitted fingerprint.
+    #[must_use]
+    pub fn matches(self, candidate: &str) -> bool {
+        let candidate = Self::from_code(candidate);
+        let mut difference = 0_u8;
+        for index in 0..self.0.len() {
+            difference |= self.0[index] ^ candidate.0[index];
+        }
+        difference == 0
+    }
 }
 
-/// Persistent emergency unlock request.
+/// Persistent emergency unlock request bound to one active session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmergencyRequest {
+    session_id: SessionId,
     reason: String,
     requested_at: u64,
-    code_hash: RecoveryCodeHash,
     timing: EmergencyTimingState,
 }
 
 impl EmergencyRequest {
     /// Creates a pending emergency unlock request from an initial clock observation.
     ///
+    /// The recovery secret is intentionally not accepted here. Its fingerprint must already
+    /// be frozen in the active session before the session reaches `Locked`.
+    ///
     /// # Errors
     ///
     /// Returns [`EmergencyError::EmptyReason`] when the supplied reason contains no
-    /// non-whitespace characters, or [`EmergencyError::EmptyRecoveryCode`] when the
-    /// supplied recovery code contains no non-whitespace characters.
+    /// non-whitespace characters.
     pub fn new(
+        session_id: SessionId,
         reason: &str,
         clock: EmergencyClockSample,
-        recovery_code: &str,
     ) -> Result<Self, EmergencyError> {
-        if recovery_code.trim().is_empty() {
-            return Err(EmergencyError::EmptyRecoveryCode);
-        }
-
         let timing = EmergencyTimingState {
             boot_id: clock.boot_id,
             monotonic_anchor_nanos: clock.monotonic_nanos,
@@ -282,12 +292,7 @@ impl EmergencyRequest {
             verified_elapsed_nanos: 0,
         };
 
-        Self::restore(
-            reason.to_owned(),
-            clock.unix_seconds,
-            RecoveryCodeHash::from_code(recovery_code),
-            timing,
-        )
+        Self::restore(session_id, reason.to_owned(), clock.unix_seconds, timing)
     }
 
     /// Restores a previously persisted emergency unlock request.
@@ -298,9 +303,9 @@ impl EmergencyRequest {
     /// non-whitespace characters, or [`EmergencyError::InvalidTimingState`] when the
     /// persisted timing evidence is invalid.
     pub fn restore(
+        session_id: SessionId,
         reason: String,
         requested_at: u64,
-        code_hash: RecoveryCodeHash,
         timing: EmergencyTimingState,
     ) -> Result<Self, EmergencyError> {
         if reason.trim().is_empty() {
@@ -311,11 +316,17 @@ impl EmergencyRequest {
         }
 
         Ok(Self {
+            session_id,
             reason,
             requested_at,
-            code_hash,
             timing,
         })
+    }
+
+    /// Returns the active session to which this request is bound.
+    #[must_use]
+    pub const fn session_id(&self) -> SessionId {
+        self.session_id
     }
 
     /// Returns the persisted reason for the emergency request.
@@ -330,23 +341,18 @@ impl EmergencyRequest {
         self.requested_at
     }
 
-    /// Returns the persisted recovery-code fingerprint.
-    #[must_use]
-    pub const fn code_hash(&self) -> RecoveryCodeHash {
-        self.code_hash
-    }
-
     /// Returns persistent monotonic timing evidence.
     #[must_use]
     pub const fn timing_state(&self) -> EmergencyTimingState {
         self.timing
     }
 
-    /// Evaluates a new clock observation without trusting wall-clock time for elapsed delay.
+    /// Evaluates a new clock observation against the recovery hash frozen before lock.
     #[must_use]
     pub fn evaluate(
         &mut self,
         clock: EmergencyClockSample,
+        expected_code_hash: RecoveryCodeHash,
         recovery_code: &str,
     ) -> EmergencyEvaluation {
         let clock_event = if clock.boot_id == self.timing.boot_id {
@@ -398,7 +404,7 @@ impl EmergencyRequest {
             );
         }
 
-        if RecoveryCodeHash::from_code(recovery_code) != self.code_hash {
+        if !expected_code_hash.matches(recovery_code) {
             return EmergencyEvaluation::new(EmergencyDecision::InvalidCode, clock_event);
         }
 
