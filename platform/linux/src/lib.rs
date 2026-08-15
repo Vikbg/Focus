@@ -7,11 +7,12 @@ use std::{
 };
 
 use focus_core::{BootId, EmergencyClockSample};
+use nix::time::{ClockId, clock_gettime};
 
 pub const CRATE_NAME: &str = "focus-linux";
 
 const BOOT_ID_PATH: &str = "/proc/sys/kernel/random/boot_id";
-const UPTIME_PATH: &str = "/proc/uptime";
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 /// Error returned while reading Linux clock-integrity sources.
 #[derive(Debug)]
@@ -19,6 +20,8 @@ pub enum ClockSampleError {
     Io(io::Error),
     InvalidBootId,
     InvalidUptime,
+    InvalidMonotonicTime,
+    MonotonicClock(nix::errno::Errno),
     SystemTimeBeforeEpoch,
 }
 
@@ -28,6 +31,8 @@ impl fmt::Display for ClockSampleError {
             Self::Io(error) => write!(formatter, "Linux clock source I/O error: {error}"),
             Self::InvalidBootId => formatter.write_str("invalid Linux boot id"),
             Self::InvalidUptime => formatter.write_str("invalid Linux uptime"),
+            Self::InvalidMonotonicTime => formatter.write_str("invalid Linux monotonic time"),
+            Self::MonotonicClock(error) => write!(formatter, "Linux monotonic clock error: {error}"),
             Self::SystemTimeBeforeEpoch => {
                 formatter.write_str("system clock is before the Unix epoch")
             }
@@ -39,7 +44,11 @@ impl Error for ClockSampleError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
-            Self::InvalidBootId | Self::InvalidUptime | Self::SystemTimeBeforeEpoch => None,
+            Self::MonotonicClock(error) => Some(error),
+            Self::InvalidBootId
+            | Self::InvalidUptime
+            | Self::InvalidMonotonicTime
+            | Self::SystemTimeBeforeEpoch => None,
         }
     }
 }
@@ -72,7 +81,8 @@ pub fn parse_boot_id(input: &str) -> Result<BootId, ClockSampleError> {
 
 /// Parses the first `/proc/uptime` value conservatively to whole seconds.
 ///
-/// Fractional seconds are discarded so the emergency wait is never shortened by rounding.
+/// This helper remains available for diagnostics and compatibility tests. Production emergency
+/// timing uses `CLOCK_BOOTTIME` at nanosecond precision instead of this rounded representation.
 ///
 /// # Errors
 ///
@@ -92,22 +102,36 @@ pub fn parse_uptime_seconds(input: &str) -> Result<u64, ClockSampleError> {
         .map_err(|_| ClockSampleError::InvalidUptime)
 }
 
-/// Samples the current Linux boot, monotonic boot uptime, and audit wall clock.
+fn boottime_nanos() -> Result<u64, ClockSampleError> {
+    let time = clock_gettime(ClockId::CLOCK_BOOTTIME).map_err(ClockSampleError::MonotonicClock)?;
+    let seconds = u64::try_from(time.tv_sec()).map_err(|_| ClockSampleError::InvalidMonotonicTime)?;
+    let nanos = u64::try_from(time.tv_nsec()).map_err(|_| ClockSampleError::InvalidMonotonicTime)?;
+    if nanos >= NANOS_PER_SECOND {
+        return Err(ClockSampleError::InvalidMonotonicTime);
+    }
+
+    seconds
+        .checked_mul(NANOS_PER_SECOND)
+        .and_then(|value| value.checked_add(nanos))
+        .ok_or(ClockSampleError::InvalidMonotonicTime)
+}
+
+/// Samples the current Linux boot, monotonic boot time, and audit wall clock.
 ///
 /// # Errors
 ///
 /// Returns an error when Linux clock sources cannot be read or parsed.
 pub fn sample_emergency_clock() -> Result<EmergencyClockSample, ClockSampleError> {
     let boot_id = parse_boot_id(&fs::read_to_string(BOOT_ID_PATH)?)?;
-    let monotonic_seconds = parse_uptime_seconds(&fs::read_to_string(UPTIME_PATH)?)?;
+    let monotonic_nanos = boottime_nanos()?;
     let unix_seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| ClockSampleError::SystemTimeBeforeEpoch)?
         .as_secs();
 
-    Ok(EmergencyClockSample::new(
+    Ok(EmergencyClockSample::new_nanos(
         boot_id,
-        monotonic_seconds,
+        monotonic_nanos,
         unix_seconds,
     ))
 }
