@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use focus_core::{
     Decision, PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId,
@@ -8,7 +12,7 @@ use focus_platform::FakeBackend;
 use focus_protocol::{
     EmergencyRequestPayload, ProtocolState, Request, RequestId, Response, ResponseError,
 };
-use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
+use focus_storage::{FocusStore, MutationReservation, SqliteStore, StoredActiveSession};
 use focusd::DaemonService;
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
@@ -91,4 +95,33 @@ async fn reused_request_id_with_different_mutation_payload_is_rejected() {
         service.handle(RequestId(88), emergency("Different reason")),
         Response::Error(ResponseError::InvalidRequest)
     );
+}
+
+#[tokio::test]
+async fn interrupted_mutation_reservation_is_never_reexecuted_after_restart() {
+    let path = temp_database();
+    let request = emergency("Reserved before crash");
+    let fingerprint = request.replay_fingerprint();
+
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store.set_active_session(&locked_session()).unwrap();
+        assert_eq!(
+            store.reserve_mutation(99, &fingerprint).unwrap(),
+            MutationReservation::Started
+        );
+    }
+
+    {
+        let store = SqliteStore::open(&path).unwrap();
+        let mut restarted = DaemonService::new(store, FakeBackend::default());
+        assert_eq!(restarted.recover().await.unwrap(), SessionState::Locked);
+        assert_eq!(
+            restarted.handle(RequestId(99), request),
+            Response::Error(ResponseError::RequestInProgress)
+        );
+        assert_eq!(restarted.state(), SessionState::Locked);
+    }
+
+    let _ = fs::remove_file(path);
 }
