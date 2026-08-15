@@ -36,8 +36,23 @@ pub type PlatformFuture<'a, T = ()> = Pin<Box<dyn Future<Output = PlatformResult
 
 /// Operating-system enforcement contract consumed by the Focus daemon.
 pub trait PlatformBackend {
+    /// Performs non-mutating readiness checks before a session starts arming.
+    fn preflight(&mut self) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Closes applications forbidden by the frozen session policy.
+    fn close_blocked_apps(&mut self) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Arms one enforcement guard.
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()>;
+
+    /// Verifies that an armed guard is healthy before the daemon reports Locked.
+    fn verify_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// Deterministic backend used by daemon tests without touching the host system.
