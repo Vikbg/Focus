@@ -16,7 +16,10 @@ pub use emergency::{
     RecoveryCodeHash, WALL_CLOCK_DRIFT_TOLERANCE_SECONDS,
 };
 pub use policy::{DecisionContext, PolicyEngine, PolicySet};
-pub use profile::{PolicyVersion, Profile, ProfileId, SessionPolicySnapshot};
+pub use profile::{
+    PolicyVersion, Profile, ProfileId, SESSION_POLICY_SCHEMA_VERSION, SessionPolicySnapshot,
+    SessionPolicySnapshotError,
+};
 pub use schedule::{Schedule, ScheduleId, ScheduleSource, ScheduleStatus, SchedulerOutcome};
 pub use session::SessionId;
 pub use state_machine::{SessionGuard, SessionState, TransitionError};

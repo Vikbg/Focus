@@ -3,9 +3,12 @@
 use std::{error::Error, fmt, path::Path};
 
 use focus_core::{
-    BootId, EmergencyRequest, EmergencyTimingState, RecoveryCodeHash, SessionId, SessionState,
+    BootId, EmergencyRequest, EmergencyTimingState, PolicyVersion, ProfileId, RecoveryCodeHash,
+    SESSION_POLICY_SCHEMA_VERSION, SessionId, SessionPolicySnapshot, SessionState,
 };
 use rusqlite::{Connection, OptionalExtension, params};
+
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 /// Error returned by the protected Focus store.
 #[derive(Debug)]
@@ -13,13 +16,20 @@ pub enum StoreError {
     Sqlite(rusqlite::Error),
     StateMismatch,
     InvalidSessionId(String),
+    InvalidProfileId(String),
     InvalidBootId(String),
     InvalidSessionState(i64),
     InvalidCount(i64),
     TimestampOutOfRange(u64),
     InvalidTimestamp(i64),
+    InvalidPolicySchemaVersion(i64),
+    InvalidPolicySnapshot,
+    InvalidPolicyDigestLength(usize),
+    PolicyDigestMismatch,
     InvalidRecoveryCodeHashLength(usize),
     InvalidEmergencyRequest,
+    IncompleteActiveSession,
+    UnsupportedSchemaVersion(i64),
     SchemaMismatch(String),
 }
 
@@ -29,20 +39,33 @@ impl fmt::Display for StoreError {
             Self::Sqlite(error) => write!(formatter, "SQLite error: {error}"),
             Self::StateMismatch => formatter.write_str("active session state mismatch"),
             Self::InvalidSessionId(value) => write!(formatter, "invalid session id: {value}"),
+            Self::InvalidProfileId(value) => write!(formatter, "invalid profile id: {value}"),
             Self::InvalidBootId(value) => write!(formatter, "invalid boot id: {value}"),
             Self::InvalidSessionState(value) => write!(formatter, "invalid session state: {value}"),
             Self::InvalidCount(value) => write!(formatter, "invalid row count: {value}"),
             Self::TimestampOutOfRange(value) => {
-                write!(formatter, "timestamp does not fit SQLite integer: {value}")
+                write!(formatter, "integer does not fit SQLite integer: {value}")
             }
-            Self::InvalidTimestamp(value) => {
-                write!(formatter, "invalid persisted timestamp: {value}")
+            Self::InvalidTimestamp(value) => write!(formatter, "invalid persisted integer: {value}"),
+            Self::InvalidPolicySchemaVersion(value) => {
+                write!(formatter, "invalid policy schema version: {value}")
             }
+            Self::InvalidPolicySnapshot => formatter.write_str("invalid persisted policy snapshot"),
+            Self::InvalidPolicyDigestLength(length) => {
+                write!(formatter, "invalid policy digest length: {length}")
+            }
+            Self::PolicyDigestMismatch => formatter.write_str("persisted policy digest mismatch"),
             Self::InvalidRecoveryCodeHashLength(length) => {
                 write!(formatter, "invalid recovery code hash length: {length}")
             }
             Self::InvalidEmergencyRequest => {
                 formatter.write_str("invalid persisted emergency request")
+            }
+            Self::IncompleteActiveSession => {
+                formatter.write_str("active session is missing frozen security context")
+            }
+            Self::UnsupportedSchemaVersion(version) => {
+                write!(formatter, "unsupported SQLite schema version: {version}")
             }
             Self::SchemaMismatch(table) => write!(formatter, "unexpected SQLite schema: {table}"),
         }
@@ -55,13 +78,20 @@ impl Error for StoreError {
             Self::Sqlite(error) => Some(error),
             Self::StateMismatch
             | Self::InvalidSessionId(_)
+            | Self::InvalidProfileId(_)
             | Self::InvalidBootId(_)
             | Self::InvalidSessionState(_)
             | Self::InvalidCount(_)
             | Self::TimestampOutOfRange(_)
             | Self::InvalidTimestamp(_)
+            | Self::InvalidPolicySchemaVersion(_)
+            | Self::InvalidPolicySnapshot
+            | Self::InvalidPolicyDigestLength(_)
+            | Self::PolicyDigestMismatch
             | Self::InvalidRecoveryCodeHashLength(_)
             | Self::InvalidEmergencyRequest
+            | Self::IncompleteActiveSession
+            | Self::UnsupportedSchemaVersion(_)
             | Self::SchemaMismatch(_) => None,
         }
     }
@@ -84,7 +114,6 @@ pub struct SecurityEvent {
 }
 
 impl SecurityEvent {
-    /// Creates a security journal event.
     #[must_use]
     pub fn new(event_type: impl Into<String>, payload: Vec<u8>) -> Self {
         Self {
@@ -121,72 +150,91 @@ impl Transition {
     }
 }
 
-/// Minimal representation of the active protected session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StoredSession {
+/// Complete immutable security context for the active protected session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredActiveSession {
     id: SessionId,
     state: SessionState,
+    policy_snapshot: SessionPolicySnapshot,
+    started_at_unix_ms: u64,
+    minimum_end_at_unix_ms: u64,
+    recovery_code_hash: RecoveryCodeHash,
 }
 
-impl StoredSession {
+impl StoredActiveSession {
     #[must_use]
-    pub const fn id(self) -> SessionId {
+    pub const fn new(
+        id: SessionId,
+        state: SessionState,
+        policy_snapshot: SessionPolicySnapshot,
+        started_at_unix_ms: u64,
+        minimum_end_at_unix_ms: u64,
+        recovery_code_hash: RecoveryCodeHash,
+    ) -> Self {
+        Self {
+            id,
+            state,
+            policy_snapshot,
+            started_at_unix_ms,
+            minimum_end_at_unix_ms,
+            recovery_code_hash,
+        }
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> SessionId {
         self.id
     }
 
     #[must_use]
-    pub const fn state(self) -> SessionState {
+    pub const fn state(&self) -> SessionState {
         self.state
+    }
+
+    #[must_use]
+    pub const fn policy_snapshot(&self) -> &SessionPolicySnapshot {
+        &self.policy_snapshot
+    }
+
+    #[must_use]
+    pub fn policy_sha256(&self) -> [u8; 32] {
+        self.policy_snapshot.policy_sha256()
+    }
+
+    #[must_use]
+    pub const fn started_at_unix_ms(&self) -> u64 {
+        self.started_at_unix_ms
+    }
+
+    #[must_use]
+    pub const fn minimum_end_at_unix_ms(&self) -> u64 {
+        self.minimum_end_at_unix_ms
+    }
+
+    #[must_use]
+    pub const fn recovery_code_hash(&self) -> RecoveryCodeHash {
+        self.recovery_code_hash
+    }
+
+    /// Updates the in-memory state for construction and test fixtures.
+    /// Persisted lifecycle changes must use `persist_transition`.
+    pub fn set_state(&mut self, state: SessionState) {
+        self.state = state;
     }
 }
 
 /// Domain-specific storage operations required by the session engine.
 pub trait FocusStore {
-    /// Returns the currently active session, if one exists.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the database cannot be queried or contains invalid state.
-    fn active_session(&self) -> StoreResult<Option<StoredSession>>;
+    fn active_session(&self) -> StoreResult<Option<StoredActiveSession>>;
 
-    /// Replaces the current active session state.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the database write fails.
-    fn set_active_session(&mut self, session_id: SessionId, state: SessionState)
-    -> StoreResult<()>;
+    fn set_active_session(&mut self, session: &StoredActiveSession) -> StoreResult<()>;
 
-    /// Atomically appends a transition and updates the active session.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StoreError::StateMismatch`] when the stored source state does not match the
-    /// transition source state. Database failures are returned as [`StoreError::Sqlite`].
     fn persist_transition(&mut self, transition: &Transition) -> StoreResult<()>;
 
-    /// Appends one security-relevant event to the protected journal.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the journal write fails.
     fn append_security_event(&mut self, event: &SecurityEvent) -> StoreResult<()>;
 
-    /// Persists the pending emergency request and its monotonic timing evidence atomically.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when a numeric field cannot be represented or the transaction fails.
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()>;
 
-    /// Atomically persists one emergency timing observation with its security event and
-    /// optional protection-state transition.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StoreError::StateMismatch`] when the optional transition no longer matches
-    /// the active session. Other database failures are returned without committing any part
-    /// of the observation.
     fn persist_emergency_observation(
         &mut self,
         request: &EmergencyRequest,
@@ -194,25 +242,10 @@ pub trait FocusStore {
         transition: Option<&Transition>,
     ) -> StoreResult<()>;
 
-    /// Restores the pending emergency unlock request, if one exists.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the database cannot be queried or the persisted request is invalid.
     fn emergency_request(&self) -> StoreResult<Option<EmergencyRequest>>;
 
-    /// Returns the number of committed session transitions.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the transition journal cannot be queried.
     fn transition_count(&self) -> StoreResult<u64>;
 
-    /// Returns the number of committed security events.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the security journal cannot be queried.
     fn security_event_count(&self) -> StoreResult<u64>;
 }
 
@@ -222,35 +255,67 @@ pub struct SqliteStore {
 }
 
 impl SqliteStore {
-    /// Opens or creates a file-backed store and applies the current schema.
+    /// Opens or creates a file-backed store and applies ordered schema migrations.
     ///
     /// # Errors
     ///
     /// Returns an error when `SQLite` cannot open or migrate the store.
     pub fn open(path: impl AsRef<Path>) -> StoreResult<Self> {
         let connection = Connection::open(path)?;
-        let store = Self { connection };
+        let mut store = Self { connection };
         store.migrate()?;
         Ok(store)
     }
 
-    /// Creates a temporary in-memory store and applies the current schema.
+    /// Creates a temporary in-memory store and applies ordered schema migrations.
     ///
     /// # Errors
     ///
     /// Returns an error when `SQLite` cannot create or migrate the store.
     pub fn open_in_memory() -> StoreResult<Self> {
         let connection = Connection::open_in_memory()?;
-        let store = Self { connection };
+        let mut store = Self { connection };
         store.migrate()?;
         Ok(store)
     }
 
-    fn migrate(&self) -> StoreResult<()> {
+    fn migrate(&mut self) -> StoreResult<()> {
+        self.connection.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE IF NOT EXISTS schema_migrations (
+                 version INTEGER PRIMARY KEY
+             );",
+        )?;
+
+        let mut version = self
+            .connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })?;
+
+        if let Some(current) = version {
+            if current > CURRENT_SCHEMA_VERSION {
+                return Err(StoreError::UnsupportedSchemaVersion(current));
+            }
+        }
+
+        if version.is_none() {
+            self.create_v1_schema()?;
+            self.connection
+                .execute("INSERT INTO schema_migrations(version) VALUES(1)", [])?;
+            version = Some(1);
+        }
+
+        if version == Some(1) {
+            self.migrate_v1_to_v2()?;
+        }
+
+        self.validate_current_schema()
+    }
+
+    fn create_v1_schema(&self) -> StoreResult<()> {
         self.connection.execute_batch(
             "
-            PRAGMA foreign_keys = ON;
-
             CREATE TABLE IF NOT EXISTS active_session (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 session_id TEXT NOT NULL,
@@ -300,14 +365,47 @@ impl SqliteStore {
                 unix_anchor INTEGER NOT NULL,
                 verified_elapsed INTEGER NOT NULL
             );
-
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version INTEGER PRIMARY KEY
-            );
             ",
         )?;
+        Ok(())
+    }
 
-        self.validate_table_columns("active_session", &["singleton", "session_id", "state"])?;
+    fn migrate_v1_to_v2(&mut self) -> StoreResult<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            "
+            ALTER TABLE active_session ADD COLUMN profile_id TEXT;
+            ALTER TABLE active_session ADD COLUMN profile_version INTEGER;
+            ALTER TABLE active_session ADD COLUMN policy_schema_version INTEGER;
+            ALTER TABLE active_session ADD COLUMN policy_payload BLOB;
+            ALTER TABLE active_session ADD COLUMN policy_sha256 BLOB;
+            ALTER TABLE active_session ADD COLUMN started_at_unix_ms INTEGER;
+            ALTER TABLE active_session ADD COLUMN minimum_end_at_unix_ms INTEGER;
+            ALTER TABLE active_session ADD COLUMN recovery_code_hash BLOB;
+            INSERT INTO schema_migrations(version) VALUES(2);
+            ",
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn validate_current_schema(&self) -> StoreResult<()> {
+        self.validate_table_columns(
+            "active_session",
+            &[
+                "singleton",
+                "session_id",
+                "state",
+                "profile_id",
+                "profile_version",
+                "policy_schema_version",
+                "policy_payload",
+                "policy_sha256",
+                "started_at_unix_ms",
+                "minimum_end_at_unix_ms",
+                "recovery_code_hash",
+            ],
+        )?;
         self.validate_table_columns(
             "session_transitions",
             &["id", "session_id", "from_state", "to_state"],
@@ -354,49 +452,129 @@ impl SqliteStore {
 }
 
 impl FocusStore for SqliteStore {
-    fn active_session(&self) -> StoreResult<Option<StoredSession>> {
+    fn active_session(&self) -> StoreResult<Option<StoredActiveSession>> {
         let row = self
             .connection
             .query_row(
-                "SELECT session_id, state FROM active_session WHERE singleton = 1",
+                "SELECT session_id, state, profile_id, profile_version, policy_schema_version,
+                        policy_payload, policy_sha256, started_at_unix_ms, minimum_end_at_unix_ms,
+                        recovery_code_hash
+                 FROM active_session WHERE singleton = 1",
                 [],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<Vec<u8>>>(5)?,
+                        row.get::<_, Option<Vec<u8>>>(6)?,
+                        row.get::<_, Option<i64>>(7)?,
+                        row.get::<_, Option<i64>>(8)?,
+                        row.get::<_, Option<Vec<u8>>>(9)?,
+                    ))
+                },
             )
             .optional()?;
 
-        row.map(|(session_id, state)| {
-            Ok(StoredSession {
-                id: decode_session_id(&session_id)?,
-                state: decode_state(state)?,
-            })
-        })
-        .transpose()
+        let Some((
+            session_id,
+            state,
+            Some(profile_id),
+            Some(profile_version),
+            Some(policy_schema_version),
+            Some(policy_payload),
+            Some(policy_sha256),
+            Some(started_at_unix_ms),
+            Some(minimum_end_at_unix_ms),
+            Some(recovery_code_hash),
+        )) = row
+        else {
+            return match row {
+                None => Ok(None),
+                Some(_) => Err(StoreError::IncompleteActiveSession),
+            };
+        };
+
+        let policy_schema_version = u32::try_from(policy_schema_version)
+            .map_err(|_| StoreError::InvalidPolicySchemaVersion(policy_schema_version))?;
+        let snapshot = SessionPolicySnapshot::restore(
+            decode_profile_id(&profile_id)?,
+            PolicyVersion(decode_u64(profile_version)?),
+            policy_schema_version,
+            &policy_payload,
+        )
+        .map_err(|_| StoreError::InvalidPolicySnapshot)?;
+
+        let digest_length = policy_sha256.len();
+        let stored_digest: [u8; 32] = policy_sha256
+            .try_into()
+            .map_err(|_| StoreError::InvalidPolicyDigestLength(digest_length))?;
+        if snapshot.policy_sha256() != stored_digest {
+            return Err(StoreError::PolicyDigestMismatch);
+        }
+
+        let recovery_hash_length = recovery_code_hash.len();
+        let recovery_code_hash: [u8; 32] = recovery_code_hash
+            .try_into()
+            .map_err(|_| StoreError::InvalidRecoveryCodeHashLength(recovery_hash_length))?;
+
+        Ok(Some(StoredActiveSession::new(
+            decode_session_id(&session_id)?,
+            decode_state(state)?,
+            snapshot,
+            decode_u64(started_at_unix_ms)?,
+            decode_u64(minimum_end_at_unix_ms)?,
+            RecoveryCodeHash::from_bytes(recovery_code_hash),
+        )))
     }
 
-    fn set_active_session(
-        &mut self,
-        session_id: SessionId,
-        state: SessionState,
-    ) -> StoreResult<()> {
+    fn set_active_session(&mut self, session: &StoredActiveSession) -> StoreResult<()> {
+        let policy_payload = session.policy_snapshot().policy_payload();
+        let policy_sha256 = session.policy_sha256();
+        let recovery_code_hash = session.recovery_code_hash().to_bytes();
         self.connection.execute(
-            "INSERT INTO active_session(singleton, session_id, state)
-             VALUES(1, ?1, ?2)
-             ON CONFLICT(singleton) DO UPDATE SET session_id = excluded.session_id, state = excluded.state",
-            params![encode_session_id(session_id), encode_state(state)],
+            "INSERT INTO active_session(
+                singleton, session_id, state, profile_id, profile_version, policy_schema_version,
+                policy_payload, policy_sha256, started_at_unix_ms, minimum_end_at_unix_ms,
+                recovery_code_hash
+             ) VALUES(1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(singleton) DO UPDATE SET
+                session_id = excluded.session_id,
+                state = excluded.state,
+                profile_id = excluded.profile_id,
+                profile_version = excluded.profile_version,
+                policy_schema_version = excluded.policy_schema_version,
+                policy_payload = excluded.policy_payload,
+                policy_sha256 = excluded.policy_sha256,
+                started_at_unix_ms = excluded.started_at_unix_ms,
+                minimum_end_at_unix_ms = excluded.minimum_end_at_unix_ms,
+                recovery_code_hash = excluded.recovery_code_hash",
+            params![
+                encode_session_id(session.id()),
+                encode_state(session.state()),
+                encode_profile_id(session.policy_snapshot().profile_id()),
+                encode_u64(session.policy_snapshot().profile_version().0)?,
+                i64::from(SESSION_POLICY_SCHEMA_VERSION),
+                policy_payload.as_slice(),
+                policy_sha256.as_slice(),
+                encode_u64(session.started_at_unix_ms())?,
+                encode_u64(session.minimum_end_at_unix_ms())?,
+                recovery_code_hash.as_slice(),
+            ],
         )?;
         Ok(())
     }
 
     fn persist_transition(&mut self, transition: &Transition) -> StoreResult<()> {
         let transaction = self.connection.transaction()?;
-        let session_id = encode_session_id(transition.session_id);
-
         transaction.execute(
             "INSERT INTO session_transitions(session_id, from_state, to_state) VALUES(?1, ?2, ?3)",
             params![
-                session_id,
+                encode_session_id(transition.session_id),
                 encode_state(transition.from),
-                encode_state(transition.to)
+                encode_state(transition.to),
             ],
         )?;
 
@@ -406,7 +584,7 @@ impl FocusStore for SqliteStore {
             params![
                 encode_state(transition.to),
                 encode_session_id(transition.session_id),
-                encode_state(transition.from)
+                encode_state(transition.from),
             ],
         )?;
 
@@ -467,7 +645,7 @@ impl FocusStore for SqliteStore {
                 encode_boot_id(timing.boot_id()),
                 monotonic_anchor,
                 unix_anchor,
-                verified_elapsed
+                verified_elapsed,
             ],
         )?;
 
@@ -478,7 +656,7 @@ impl FocusStore for SqliteStore {
                 params![
                     encode_session_id(transition.session_id),
                     encode_state(transition.from),
-                    encode_state(transition.to)
+                    encode_state(transition.to),
                 ],
             )?;
             let changed = transaction.execute(
@@ -487,7 +665,7 @@ impl FocusStore for SqliteStore {
                 params![
                     encode_state(transition.to),
                     encode_session_id(transition.session_id),
-                    encode_state(transition.from)
+                    encode_state(transition.from),
                 ],
             )?;
             if changed != 1 {
@@ -599,6 +777,16 @@ fn decode_session_id(value: &str) -> StoreResult<SessionId> {
     u128::from_str_radix(value, 16)
         .map(SessionId)
         .map_err(|_| StoreError::InvalidSessionId(value.to_owned()))
+}
+
+fn encode_profile_id(profile_id: ProfileId) -> String {
+    format!("{:032x}", profile_id.0)
+}
+
+fn decode_profile_id(value: &str) -> StoreResult<ProfileId> {
+    u128::from_str_radix(value, 16)
+        .map(ProfileId)
+        .map_err(|_| StoreError::InvalidProfileId(value.to_owned()))
 }
 
 fn encode_boot_id(boot_id: BootId) -> String {

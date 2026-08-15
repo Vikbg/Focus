@@ -1,8 +1,8 @@
 use focus_core::{
-    BootId, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyRequest,
-    SessionId, SessionState,
+    BootId, Decision, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyRequest,
+    PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId, SessionState,
 };
-use focus_storage::{FocusStore, SqliteStore};
+use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
 use focusd::{
     begin_linux_emergency_request, evaluate_emergency_unlock, evaluate_linux_emergency_unlock,
 };
@@ -12,6 +12,22 @@ const BOOT_A: BootId = BootId(0xaaaa);
 
 const fn sample(monotonic_seconds: u64, unix_seconds: u64) -> EmergencyClockSample {
     EmergencyClockSample::new(BOOT_A, monotonic_seconds, unix_seconds)
+}
+
+fn stored_session(id: u128, state: SessionState) -> StoredActiveSession {
+    StoredActiveSession::new(
+        SessionId(id),
+        state,
+        Profile::new(
+            ProfileId(7),
+            PolicyVersion(3),
+            PolicySet::new(Decision::Allow),
+        )
+        .snapshot(),
+        1_000,
+        2_000,
+        RecoveryCodeHash::from_code(CODE),
+    )
 }
 
 #[test]
@@ -63,10 +79,8 @@ fn wall_clock_anomaly_is_journaled_and_timing_progress_is_persisted() {
 #[test]
 fn monotonic_regression_moves_active_session_to_protection_failure() {
     let mut store = SqliteStore::open_in_memory().unwrap();
-    let session_id = SessionId(7);
-    store
-        .set_active_session(session_id, SessionState::EmergencyPending)
-        .unwrap();
+    let session = stored_session(7, SessionState::EmergencyPending);
+    store.set_active_session(&session).unwrap();
     let mut request =
         EmergencyRequest::new("Need a real emergency exit", sample(100, 1_000), CODE).unwrap();
     store.persist_emergency_request(&request).unwrap();
@@ -83,8 +97,7 @@ fn monotonic_regression_moves_active_session_to_protection_failure() {
         EmergencyClockEvent::MonotonicRegression
     );
     assert_eq!(store.security_event_count().unwrap(), 1);
-    assert_eq!(
-        store.active_session().unwrap().unwrap().state(),
-        SessionState::ProtectionFailure
-    );
+    let active = store.active_session().unwrap().unwrap();
+    assert_eq!(active.state(), SessionState::ProtectionFailure);
+    assert_eq!(active.policy_sha256(), session.policy_sha256());
 }

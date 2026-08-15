@@ -16,14 +16,16 @@ use std::{
 
 use focus_core::{
     EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyEvaluation,
-    EmergencyRequest, SessionId, SessionPolicySnapshot, SessionState,
+    EmergencyRequest, SessionState,
 };
 use focus_platform::{GuardKind, PlatformBackend, PlatformError};
 use focus_protocol::{
     ClientKind, ProtocolState, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope,
     ResponseError,
 };
-use focus_storage::{FocusStore, SecurityEvent, StoreError, Transition};
+use focus_storage::{
+    FocusStore, SecurityEvent, StoreError, StoredActiveSession, Transition,
+};
 use nix::{
     sys::socket::{getsockopt, sockopt::PeerCredentials},
     unistd::{Uid, chown},
@@ -209,8 +211,8 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
 
 /// Arms one Focus session and reports Locked only after all critical guards are healthy.
 ///
-/// The supplied policy is already a versioned immutable snapshot. It is cloned at the
-/// start of arming so later profile edits cannot affect this attempt.
+/// The supplied active-session record already contains the versioned immutable policy,
+/// timing context, and precommitted recovery-code hash required for safe restart recovery.
 ///
 /// # Errors
 ///
@@ -220,8 +222,7 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
 pub async fn arm_session<S, B>(
     store: &mut S,
     backend: &mut B,
-    session_id: SessionId,
-    policy_snapshot: &SessionPolicySnapshot,
+    session: &StoredActiveSession,
 ) -> Result<SessionState, ArmError>
 where
     S: FocusStore,
@@ -232,10 +233,7 @@ where
     }
 
     backend.preflight().await?;
-    store.set_active_session(session_id, SessionState::Arming)?;
-
-    let frozen_policy = policy_snapshot.clone();
-    let _ = frozen_policy.policy();
+    store.set_active_session(session)?;
 
     backend.close_blocked_apps().await?;
 
@@ -248,7 +246,7 @@ where
     }
 
     store.persist_transition(&Transition::new(
-        session_id,
+        session.id(),
         SessionState::Arming,
         SessionState::Locked,
     ))?;
