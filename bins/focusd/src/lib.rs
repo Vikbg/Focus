@@ -149,7 +149,10 @@ impl fmt::Display for EmergencyUnlockError {
                 formatter.write_str("emergency request belongs to a different session")
             }
             Self::InvalidSessionState(state) => {
-                write!(formatter, "invalid session state for emergency unlock: {state:?}")
+                write!(
+                    formatter,
+                    "invalid session state for emergency unlock: {state:?}"
+                )
             }
         }
     }
@@ -292,7 +295,9 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
     store.persist_emergency_observation(
         &candidate,
         event.as_ref(),
-        transition.as_ref().map(|validated| (active.id(), validated)),
+        transition
+            .as_ref()
+            .map(|validated| (active.id(), validated)),
     )?;
     *request = candidate;
 

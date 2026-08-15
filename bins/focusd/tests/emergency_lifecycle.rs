@@ -102,10 +102,7 @@ fn stale_emergency_request_from_another_session_is_rejected() {
 
     let result = evaluate_emergency_unlock(&mut store, &mut stale, clock, CODE);
 
-    assert!(matches!(
-        result,
-        Err(EmergencyUnlockError::SessionMismatch)
-    ));
+    assert!(matches!(result, Err(EmergencyUnlockError::SessionMismatch)));
     assert_eq!(
         store.active_session().unwrap().unwrap().state(),
         SessionState::EmergencyPending

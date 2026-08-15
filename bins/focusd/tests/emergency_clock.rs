@@ -36,7 +36,8 @@ fn production_emergency_path_samples_linux_clock_internally() {
     let mut store = SqliteStore::open_in_memory().unwrap();
     let session = stored_session(6, SessionState::Locked);
     store.set_active_session(&session).unwrap();
-    let mut request = begin_linux_emergency_request(&mut store, "Need a real emergency exit").unwrap();
+    let mut request =
+        begin_linux_emergency_request(&mut store, "Need a real emergency exit").unwrap();
 
     let evaluation = evaluate_linux_emergency_unlock(&mut store, &mut request, CODE).unwrap();
 

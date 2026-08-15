@@ -31,7 +31,10 @@ impl fmt::Display for LinuxEmergencyError {
             Self::Evaluation(error) => write!(formatter, "emergency evaluation error: {error}"),
             Self::NoActiveSession => formatter.write_str("no active Focus session"),
             Self::InvalidSessionState(state) => {
-                write!(formatter, "cannot request emergency unlock from state {state:?}")
+                write!(
+                    formatter,
+                    "cannot request emergency unlock from state {state:?}"
+                )
             }
         }
     }
@@ -103,10 +106,8 @@ pub fn begin_linux_emergency_request<S: FocusStore>(
 
     let clock = focus_linux::sample_emergency_clock()?;
     let request = EmergencyRequest::new(active.id(), reason, clock)?;
-    let context = TransitionContext::new(
-        active.started_at_unix_ms(),
-        active.minimum_end_at_unix_ms(),
-    );
+    let context =
+        TransitionContext::new(active.started_at_unix_ms(), active.minimum_end_at_unix_ms());
     let pending = SessionMachine::apply(
         SessionState::Locked,
         SessionEvent::EmergencyRequested,
