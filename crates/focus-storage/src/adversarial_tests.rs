@@ -17,7 +17,7 @@ fn sqlite_full_during_security_write_fails_without_partial_event() {
         .unwrap();
     assert_eq!(configured, page_count);
 
-    let event = SecurityEvent::new("oversized", vec![0x5a; 2 * 1024 * 1024]);
+    let event = SecurityEvent::new("oversized", vec![0x5a_u8; 2 * 1024 * 1024]);
 
     assert!(store.append_security_event(&event).is_err());
     assert_eq!(store.security_event_count().unwrap(), 0);
