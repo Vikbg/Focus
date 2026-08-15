@@ -53,7 +53,10 @@ async fn oversized_frame_without_newline_is_rejected_before_read_timeout() {
 
     wait_for_socket(&socket).await;
     let mut stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
-    stream.write_all(&vec![b'x'; MAX_FRAME_BYTES + 1]).await.unwrap();
+    stream
+        .write_all(&vec![b'x'; MAX_FRAME_BYTES + 1])
+        .await
+        .unwrap();
 
     let mut line = String::new();
     let response = tokio::time::timeout(
@@ -65,7 +68,9 @@ async fn oversized_frame_without_newline_is_rejected_before_read_timeout() {
     let _ = shutdown_tx.send(());
     server.await.unwrap();
 
-    response.expect("oversized frame must fail before the general read timeout").unwrap();
+    response
+        .expect("oversized frame must fail before the general read timeout")
+        .unwrap();
     let envelope = ResponseEnvelope::decode(line.trim()).unwrap();
     assert_eq!(
         envelope.response(),
