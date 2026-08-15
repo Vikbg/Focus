@@ -146,7 +146,10 @@ fn read_only_database_cannot_accept_security_writes() {
     fs::set_permissions(&path, fs::Permissions::from_mode(original_mode)).unwrap();
     cleanup_db(&path);
 
-    assert!(failed_closed, "read-only database accepted a security write");
+    assert!(
+        failed_closed,
+        "read-only database accepted a security write"
+    );
 }
 
 #[test]
