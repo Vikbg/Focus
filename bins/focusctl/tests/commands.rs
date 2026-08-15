@@ -30,14 +30,14 @@ fn expected_request(command: &str) -> Request {
     }
 }
 
-fn success_response(request: Request) -> Response {
+fn success_response(request: &Request) -> Response {
     match request {
         Request::GetStatus => Response::Status(focus_protocol::ProtocolState::Idle),
         Request::GetSession => Response::Session(focus_protocol::ProtocolState::Idle),
         Request::Doctor => Response::DoctorReachable,
         Request::GetVpnList => Response::VpnListEmpty,
-        Request::VpnUp { id } => Response::VpnUpRequested(id),
-        Request::VpnDown { id } => Response::VpnDownRequested(id),
+        Request::VpnUp { id } => Response::VpnUpRequested(*id),
+        Request::VpnDown { id } => Response::VpnDownRequested(*id),
         _ => panic!("unexpected test request"),
     }
 }
@@ -57,7 +57,7 @@ fn round_trip(command: &str) -> RequestEnvelope {
             .read_line(&mut line)
             .unwrap();
         let envelope = RequestEnvelope::decode(line.trim()).unwrap();
-        let response = ResponseEnvelope::new(envelope.request_id(), success_response(expected));
+        let response = ResponseEnvelope::new(envelope.request_id(), success_response(&expected));
         stream.write_all(response.encode().as_bytes()).unwrap();
         stream.write_all(b"\n").unwrap();
         envelope
