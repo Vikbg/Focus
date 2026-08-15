@@ -145,7 +145,7 @@ where
     let response = if is_read_only(request) {
         response_for(request, snapshot_state(&snapshot))
     } else {
-        service.lock().await.handle(request).await
+        service.lock().await.handle(request)
     };
 
     write_response(&mut stream, envelope.request_id(), response).await
@@ -210,7 +210,7 @@ where
 
         loop {
             tokio::select! {
-                _ = &mut shutdown => break,
+                () = &mut shutdown => break,
                 accepted = listener.accept() => {
                     let (stream, _) = accepted?;
                     let service = Arc::clone(&self.service);
