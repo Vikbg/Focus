@@ -46,7 +46,9 @@ impl fmt::Display for StoreError {
             Self::TimestampOutOfRange(value) => {
                 write!(formatter, "integer does not fit SQLite integer: {value}")
             }
-            Self::InvalidTimestamp(value) => write!(formatter, "invalid persisted integer: {value}"),
+            Self::InvalidTimestamp(value) => {
+                write!(formatter, "invalid persisted integer: {value}")
+            }
             Self::InvalidPolicySchemaVersion(value) => {
                 write!(formatter, "invalid policy schema version: {value}")
             }
@@ -287,11 +289,11 @@ impl SqliteStore {
              );",
         )?;
 
-        let mut version = self
-            .connection
-            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
-                row.get::<_, Option<i64>>(0)
-            })?;
+        let mut version =
+            self.connection
+                .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                    row.get::<_, Option<i64>>(0)
+                })?;
 
         if let Some(current) = version {
             if current > CURRENT_SCHEMA_VERSION {

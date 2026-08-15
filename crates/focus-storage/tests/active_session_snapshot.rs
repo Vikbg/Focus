@@ -56,8 +56,14 @@ fn active_session_reopen_restores_exact_policy_version_and_digest() {
     assert_eq!(restored, expected);
     assert_eq!(restored.policy_sha256(), expected_digest);
     assert_eq!(restored.policy_snapshot().profile_id(), ProfileId(7));
-    assert_eq!(restored.policy_snapshot().profile_version(), PolicyVersion(3));
-    assert_eq!(restored.policy_snapshot().policy(), PolicySet::new(Decision::Allow));
+    assert_eq!(
+        restored.policy_snapshot().profile_version(),
+        PolicyVersion(3)
+    );
+    assert_eq!(
+        restored.policy_snapshot().policy(),
+        PolicySet::new(Decision::Allow)
+    );
 
     drop(store);
     let _ = fs::remove_file(path);
@@ -79,13 +85,22 @@ fn profile_edit_does_not_change_recovered_locked_session() {
         PolicyVersion(4),
         PolicySet::new(Decision::Classify),
     );
-    assert_ne!(edited_profile.snapshot(), original.policy_snapshot().clone());
+    assert_ne!(
+        edited_profile.snapshot(),
+        original.policy_snapshot().clone()
+    );
 
     let store = SqliteStore::open(&path).unwrap();
     let restored = store.active_session().unwrap().unwrap();
 
-    assert_eq!(restored.policy_snapshot().profile_version(), PolicyVersion(3));
-    assert_eq!(restored.policy_snapshot().policy(), PolicySet::new(Decision::Allow));
+    assert_eq!(
+        restored.policy_snapshot().profile_version(),
+        PolicyVersion(3)
+    );
+    assert_eq!(
+        restored.policy_snapshot().policy(),
+        PolicySet::new(Decision::Allow)
+    );
     assert_eq!(restored.policy_sha256(), original.policy_sha256());
 
     drop(store);

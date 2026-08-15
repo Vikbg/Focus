@@ -1,6 +1,7 @@
 use focus_core::{
-    BootId, Decision, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyRequest,
-    PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId, SessionState,
+    BootId, Decision, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision,
+    EmergencyRequest, PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId,
+    SessionState,
 };
 use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
 use focusd::{

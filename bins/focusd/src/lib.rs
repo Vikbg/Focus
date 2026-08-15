@@ -23,9 +23,7 @@ use focus_protocol::{
     ClientKind, ProtocolState, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope,
     ResponseError,
 };
-use focus_storage::{
-    FocusStore, SecurityEvent, StoreError, StoredActiveSession, Transition,
-};
+use focus_storage::{FocusStore, SecurityEvent, StoreError, StoredActiveSession, Transition};
 use nix::{
     sys::socket::{getsockopt, sockopt::PeerCredentials},
     unistd::{Uid, chown},
