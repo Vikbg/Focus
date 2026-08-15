@@ -5,6 +5,9 @@ use sha2::{Digest, Sha256};
 /// Mandatory delay before an emergency unlock can be authorized.
 pub const EMERGENCY_DELAY_SECONDS: u64 = 600;
 
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
+const EMERGENCY_DELAY_NANOS: u64 = EMERGENCY_DELAY_SECONDS * NANOS_PER_SECOND;
+
 /// Allowed wall-clock drift before Focus records an anomaly.
 pub const WALL_CLOCK_DRIFT_TOLERANCE_SECONDS: u64 = 5;
 
@@ -16,17 +19,27 @@ pub struct BootId(pub u128);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmergencyClockSample {
     boot_id: BootId,
-    monotonic_seconds: u64,
+    monotonic_nanos: u64,
     unix_seconds: u64,
 }
 
 impl EmergencyClockSample {
-    /// Creates one clock observation.
+    /// Creates one clock observation from whole monotonic seconds.
     #[must_use]
     pub const fn new(boot_id: BootId, monotonic_seconds: u64, unix_seconds: u64) -> Self {
+        Self::new_nanos(
+            boot_id,
+            monotonic_seconds.saturating_mul(NANOS_PER_SECOND),
+            unix_seconds,
+        )
+    }
+
+    /// Creates one clock observation from monotonic nanoseconds.
+    #[must_use]
+    pub const fn new_nanos(boot_id: BootId, monotonic_nanos: u64, unix_seconds: u64) -> Self {
         Self {
             boot_id,
-            monotonic_seconds,
+            monotonic_nanos,
             unix_seconds,
         }
     }
@@ -37,10 +50,16 @@ impl EmergencyClockSample {
         self.boot_id
     }
 
-    /// Returns monotonic seconds elapsed within the current boot.
+    /// Returns whole monotonic seconds elapsed within the current boot.
     #[must_use]
     pub const fn monotonic_seconds(self) -> u64 {
-        self.monotonic_seconds
+        self.monotonic_nanos / NANOS_PER_SECOND
+    }
+
+    /// Returns monotonic nanoseconds elapsed within the current boot.
+    #[must_use]
+    pub const fn monotonic_nanos(self) -> u64 {
+        self.monotonic_nanos
     }
 
     /// Returns the wall-clock Unix timestamp used only for audit and anomaly detection.
@@ -54,13 +73,13 @@ impl EmergencyClockSample {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmergencyTimingState {
     boot_id: BootId,
-    monotonic_anchor_seconds: u64,
+    monotonic_anchor_nanos: u64,
     unix_anchor_seconds: u64,
-    verified_elapsed_seconds: u64,
+    verified_elapsed_nanos: u64,
 }
 
 impl EmergencyTimingState {
-    /// Restores persisted timing evidence.
+    /// Restores persisted timing evidence encoded in whole seconds.
     ///
     /// # Errors
     ///
@@ -72,15 +91,35 @@ impl EmergencyTimingState {
         unix_anchor_seconds: u64,
         verified_elapsed_seconds: u64,
     ) -> Result<Self, EmergencyError> {
-        if verified_elapsed_seconds > EMERGENCY_DELAY_SECONDS {
+        Self::restore_nanos(
+            boot_id,
+            monotonic_anchor_seconds.saturating_mul(NANOS_PER_SECOND),
+            unix_anchor_seconds,
+            verified_elapsed_seconds.saturating_mul(NANOS_PER_SECOND),
+        )
+    }
+
+    /// Restores persisted timing evidence encoded in nanoseconds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EmergencyError::InvalidTimingState`] when verified elapsed time exceeds
+    /// the mandatory emergency delay.
+    pub const fn restore_nanos(
+        boot_id: BootId,
+        monotonic_anchor_nanos: u64,
+        unix_anchor_seconds: u64,
+        verified_elapsed_nanos: u64,
+    ) -> Result<Self, EmergencyError> {
+        if verified_elapsed_nanos > EMERGENCY_DELAY_NANOS {
             return Err(EmergencyError::InvalidTimingState);
         }
 
         Ok(Self {
             boot_id,
-            monotonic_anchor_seconds,
+            monotonic_anchor_nanos,
             unix_anchor_seconds,
-            verified_elapsed_seconds,
+            verified_elapsed_nanos,
         })
     }
 
@@ -90,10 +129,16 @@ impl EmergencyTimingState {
         self.boot_id
     }
 
-    /// Returns the latest verified monotonic anchor.
+    /// Returns the latest verified monotonic anchor in whole seconds.
     #[must_use]
     pub const fn monotonic_anchor_seconds(self) -> u64 {
-        self.monotonic_anchor_seconds
+        self.monotonic_anchor_nanos / NANOS_PER_SECOND
+    }
+
+    /// Returns the latest verified monotonic anchor in nanoseconds.
+    #[must_use]
+    pub const fn monotonic_anchor_nanos(self) -> u64 {
+        self.monotonic_anchor_nanos
     }
 
     /// Returns the wall-clock value observed at the latest verified anchor.
@@ -102,10 +147,16 @@ impl EmergencyTimingState {
         self.unix_anchor_seconds
     }
 
-    /// Returns elapsed seconds proven by monotonic observations.
+    /// Returns elapsed whole seconds proven by monotonic observations.
     #[must_use]
     pub const fn verified_elapsed_seconds(self) -> u64 {
-        self.verified_elapsed_seconds
+        self.verified_elapsed_nanos / NANOS_PER_SECOND
+    }
+
+    /// Returns elapsed nanoseconds proven by monotonic observations.
+    #[must_use]
+    pub const fn verified_elapsed_nanos(self) -> u64 {
+        self.verified_elapsed_nanos
     }
 }
 
@@ -226,9 +277,9 @@ impl EmergencyRequest {
 
         let timing = EmergencyTimingState {
             boot_id: clock.boot_id,
-            monotonic_anchor_seconds: clock.monotonic_seconds,
+            monotonic_anchor_nanos: clock.monotonic_nanos,
             unix_anchor_seconds: clock.unix_seconds,
-            verified_elapsed_seconds: 0,
+            verified_elapsed_nanos: 0,
         };
 
         Self::restore(
@@ -255,7 +306,7 @@ impl EmergencyRequest {
         if reason.trim().is_empty() {
             return Err(EmergencyError::EmptyReason);
         }
-        if timing.verified_elapsed_seconds > EMERGENCY_DELAY_SECONDS {
+        if timing.verified_elapsed_nanos > EMERGENCY_DELAY_NANOS {
             return Err(EmergencyError::InvalidTimingState);
         }
 
@@ -299,29 +350,29 @@ impl EmergencyRequest {
         recovery_code: &str,
     ) -> EmergencyEvaluation {
         let clock_event = if clock.boot_id == self.timing.boot_id {
-            if clock.monotonic_seconds < self.timing.monotonic_anchor_seconds {
+            if clock.monotonic_nanos < self.timing.monotonic_anchor_nanos {
                 return EmergencyEvaluation::new(
                     EmergencyDecision::ClockIntegrityFailure,
                     EmergencyClockEvent::MonotonicRegression,
                 );
             }
 
-            let monotonic_delta = clock
-                .monotonic_seconds
-                .saturating_sub(self.timing.monotonic_anchor_seconds);
-            self.timing.verified_elapsed_seconds = self
+            let monotonic_delta_nanos = clock
+                .monotonic_nanos
+                .saturating_sub(self.timing.monotonic_anchor_nanos);
+            self.timing.verified_elapsed_nanos = self
                 .timing
-                .verified_elapsed_seconds
-                .saturating_add(monotonic_delta)
-                .min(EMERGENCY_DELAY_SECONDS);
+                .verified_elapsed_nanos
+                .saturating_add(monotonic_delta_nanos)
+                .min(EMERGENCY_DELAY_NANOS);
 
             let expected_unix = self
                 .timing
                 .unix_anchor_seconds
-                .saturating_add(monotonic_delta);
+                .saturating_add(monotonic_delta_nanos / NANOS_PER_SECOND);
             let drift = clock.unix_seconds.abs_diff(expected_unix);
 
-            self.timing.monotonic_anchor_seconds = clock.monotonic_seconds;
+            self.timing.monotonic_anchor_nanos = clock.monotonic_nanos;
             self.timing.unix_anchor_seconds = clock.unix_seconds;
 
             if drift > WALL_CLOCK_DRIFT_TOLERANCE_SECONDS {
@@ -331,16 +382,18 @@ impl EmergencyRequest {
             }
         } else {
             self.timing.boot_id = clock.boot_id;
-            self.timing.monotonic_anchor_seconds = clock.monotonic_seconds;
+            self.timing.monotonic_anchor_nanos = clock.monotonic_nanos;
             self.timing.unix_anchor_seconds = clock.unix_seconds;
             EmergencyClockEvent::RebootDetected
         };
 
-        let remaining_seconds =
-            EMERGENCY_DELAY_SECONDS.saturating_sub(self.timing.verified_elapsed_seconds);
-        if remaining_seconds != 0 {
+        let remaining_nanos =
+            EMERGENCY_DELAY_NANOS.saturating_sub(self.timing.verified_elapsed_nanos);
+        if remaining_nanos != 0 {
             return EmergencyEvaluation::new(
-                EmergencyDecision::Waiting { remaining_seconds },
+                EmergencyDecision::Waiting {
+                    remaining_seconds: remaining_nanos.div_ceil(NANOS_PER_SECOND),
+                },
                 clock_event,
             );
         }
