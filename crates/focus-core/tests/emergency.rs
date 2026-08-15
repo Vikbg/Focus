@@ -1,11 +1,12 @@
 use focus_core::{
     BootId, EMERGENCY_DELAY_SECONDS, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision,
-    EmergencyError, EmergencyRequest, RecoveryCodeHash,
+    EmergencyError, EmergencyRequest, RecoveryCodeHash, SessionId,
 };
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
 const BOOT_A: BootId = BootId(0xaaaa);
 const BOOT_B: BootId = BootId(0xbbbb);
+const SESSION: SessionId = SessionId(42);
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 const fn sample(
@@ -24,36 +25,28 @@ const fn sample_nanos(
     EmergencyClockSample::new_nanos(boot_id, monotonic_nanos, unix_seconds)
 }
 
-#[test]
-fn emergency_reason_is_mandatory() {
-    assert_eq!(
-        EmergencyRequest::new("   ", sample(BOOT_A, 100, 1_000), CODE),
-        Err(EmergencyError::EmptyReason)
-    );
+fn expected_hash() -> RecoveryCodeHash {
+    RecoveryCodeHash::from_code(CODE)
 }
 
 #[test]
-fn emergency_recovery_code_is_mandatory() {
+fn emergency_reason_is_mandatory() {
     assert_eq!(
-        EmergencyRequest::new(
-            "Need to leave for a real emergency",
-            sample(BOOT_A, 100, 1_000),
-            "   ",
-        ),
-        Err(EmergencyError::EmptyRecoveryCode)
+        EmergencyRequest::new(SESSION, "   ", sample(BOOT_A, 100, 1_000)),
+        Err(EmergencyError::EmptyReason)
     );
 }
 
 #[test]
 fn forward_wall_clock_jump_does_not_advance_emergency_delay() {
     let mut request = EmergencyRequest::new(
+        SESSION,
         "Need to leave for a real emergency",
         sample(BOOT_A, 100, 1_000),
-        CODE,
     )
     .unwrap();
 
-    let evaluation = request.evaluate(sample(BOOT_A, 160, 1_600), CODE);
+    let evaluation = request.evaluate(sample(BOOT_A, 160, 1_600), expected_hash(), CODE);
 
     assert_eq!(
         evaluation.decision(),
@@ -70,13 +63,13 @@ fn forward_wall_clock_jump_does_not_advance_emergency_delay() {
 #[test]
 fn backward_wall_clock_jump_does_not_reset_or_advance_emergency_delay() {
     let mut request = EmergencyRequest::new(
+        SESSION,
         "Need to leave for a real emergency",
         sample(BOOT_A, 100, 1_000),
-        CODE,
     )
     .unwrap();
 
-    let evaluation = request.evaluate(sample(BOOT_A, 160, 900), CODE);
+    let evaluation = request.evaluate(sample(BOOT_A, 160, 900), expected_hash(), CODE);
 
     assert_eq!(
         evaluation.decision(),
@@ -95,13 +88,17 @@ fn correct_code_before_600_real_seconds_is_denied_even_across_second_boundaries(
     let start = 100 * NANOS_PER_SECOND + 900_000_000;
     let before_deadline = 700 * NANOS_PER_SECOND + 100_000_000;
     let mut request = EmergencyRequest::new(
+        SESSION,
         "Need to leave for a real emergency",
         sample_nanos(BOOT_A, start, 1_000),
-        CODE,
     )
     .unwrap();
 
-    let evaluation = request.evaluate(sample_nanos(BOOT_A, before_deadline, 1_599), CODE);
+    let evaluation = request.evaluate(
+        sample_nanos(BOOT_A, before_deadline, 1_599),
+        expected_hash(),
+        CODE,
+    );
 
     assert_eq!(
         evaluation.decision(),
@@ -114,13 +111,13 @@ fn correct_code_before_600_real_seconds_is_denied_even_across_second_boundaries(
 #[test]
 fn correct_code_at_599_monotonic_seconds_is_denied() {
     let mut request = EmergencyRequest::new(
+        SESSION,
         "Need to leave for a real emergency",
         sample(BOOT_A, 100, 1_000),
-        CODE,
     )
     .unwrap();
 
-    let evaluation = request.evaluate(sample(BOOT_A, 699, 1_599), CODE);
+    let evaluation = request.evaluate(sample(BOOT_A, 699, 1_599), expected_hash(), CODE);
 
     assert_eq!(
         evaluation.decision(),
@@ -134,13 +131,13 @@ fn correct_code_at_599_monotonic_seconds_is_denied() {
 #[test]
 fn correct_code_at_600_monotonic_seconds_is_authorized() {
     let mut request = EmergencyRequest::new(
+        SESSION,
         "Need to leave for a real emergency",
         sample(BOOT_A, 100, 1_000),
-        CODE,
     )
     .unwrap();
 
-    let evaluation = request.evaluate(sample(BOOT_A, 700, 1_600), CODE);
+    let evaluation = request.evaluate(sample(BOOT_A, 700, 1_600), expected_hash(), CODE);
 
     assert_eq!(evaluation.decision(), EmergencyDecision::Authorized);
     assert_eq!(evaluation.clock_event(), EmergencyClockEvent::None);
@@ -149,13 +146,13 @@ fn correct_code_at_600_monotonic_seconds_is_authorized() {
 #[test]
 fn wrong_code_remains_denied_after_verified_monotonic_delay() {
     let mut request = EmergencyRequest::new(
+        SESSION,
         "Need to leave for a real emergency",
         sample(BOOT_A, 100, 1_000),
-        CODE,
     )
     .unwrap();
 
-    let evaluation = request.evaluate(sample(BOOT_A, 700, 1_600), "WRONG-CODE");
+    let evaluation = request.evaluate(sample(BOOT_A, 700, 1_600), expected_hash(), "WRONG-CODE");
 
     assert_eq!(evaluation.decision(), EmergencyDecision::InvalidCode);
 }
@@ -163,35 +160,35 @@ fn wrong_code_remains_denied_after_verified_monotonic_delay() {
 #[test]
 fn daemon_restart_on_same_boot_keeps_monotonic_progress() {
     let original = EmergencyRequest::new(
+        SESSION,
         "Power outage requires shutdown",
         sample(BOOT_A, 100, 2_000),
-        CODE,
     )
     .unwrap();
     let mut restored = EmergencyRequest::restore(
+        original.session_id(),
         original.reason().to_owned(),
         original.requested_at(),
-        original.code_hash(),
         original.timing_state(),
     )
     .unwrap();
 
-    let evaluation = restored.evaluate(sample(BOOT_A, 700, 2_600), CODE);
+    let evaluation = restored.evaluate(sample(BOOT_A, 700, 2_600), expected_hash(), CODE);
 
     assert_eq!(evaluation.decision(), EmergencyDecision::Authorized);
     assert_eq!(evaluation.clock_event(), EmergencyClockEvent::None);
-    assert_eq!(restored.code_hash(), RecoveryCodeHash::from_code(CODE));
+    assert_eq!(restored.session_id(), SESSION);
 }
 
 #[test]
 fn reboot_preserves_only_progress_verified_before_reboot() {
     let mut original = EmergencyRequest::new(
+        SESSION,
         "Power outage requires shutdown",
         sample(BOOT_A, 100, 2_000),
-        CODE,
     )
     .unwrap();
-    let before_reboot = original.evaluate(sample(BOOT_A, 400, 2_300), CODE);
+    let before_reboot = original.evaluate(sample(BOOT_A, 400, 2_300), expected_hash(), CODE);
     assert_eq!(
         before_reboot.decision(),
         EmergencyDecision::Waiting {
@@ -200,14 +197,14 @@ fn reboot_preserves_only_progress_verified_before_reboot() {
     );
 
     let mut restored = EmergencyRequest::restore(
+        original.session_id(),
         original.reason().to_owned(),
         original.requested_at(),
-        original.code_hash(),
         original.timing_state(),
     )
     .unwrap();
 
-    let after_reboot = restored.evaluate(sample(BOOT_B, 10, 50_000), CODE);
+    let after_reboot = restored.evaluate(sample(BOOT_B, 10, 50_000), expected_hash(), CODE);
     assert_eq!(
         after_reboot.decision(),
         EmergencyDecision::Waiting {
@@ -219,27 +216,27 @@ fn reboot_preserves_only_progress_verified_before_reboot() {
         EmergencyClockEvent::RebootDetected
     );
 
-    let completed = restored.evaluate(sample(BOOT_B, 310, 50_300), CODE);
+    let completed = restored.evaluate(sample(BOOT_B, 310, 50_300), expected_hash(), CODE);
     assert_eq!(completed.decision(), EmergencyDecision::Authorized);
 }
 
 #[test]
 fn reboot_without_checkpoint_gets_no_unverified_offline_credit() {
     let original = EmergencyRequest::new(
+        SESSION,
         "Power outage requires shutdown",
         sample(BOOT_A, 100, 2_000),
-        CODE,
     )
     .unwrap();
     let mut restored = EmergencyRequest::restore(
+        original.session_id(),
         original.reason().to_owned(),
         original.requested_at(),
-        original.code_hash(),
         original.timing_state(),
     )
     .unwrap();
 
-    let evaluation = restored.evaluate(sample(BOOT_B, 10, 50_000), CODE);
+    let evaluation = restored.evaluate(sample(BOOT_B, 10, 50_000), expected_hash(), CODE);
 
     assert_eq!(
         evaluation.decision(),
@@ -256,13 +253,13 @@ fn reboot_without_checkpoint_gets_no_unverified_offline_credit() {
 #[test]
 fn monotonic_regression_fails_closed() {
     let mut request = EmergencyRequest::new(
+        SESSION,
         "Need to leave for a real emergency",
         sample(BOOT_A, 100, 1_000),
-        CODE,
     )
     .unwrap();
 
-    let evaluation = request.evaluate(sample(BOOT_A, 99, 1_001), CODE);
+    let evaluation = request.evaluate(sample(BOOT_A, 99, 1_001), expected_hash(), CODE);
 
     assert_eq!(
         evaluation.decision(),
