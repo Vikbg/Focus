@@ -4,9 +4,20 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use focus_core::{EMERGENCY_DELAY_SECONDS, EmergencyDecision, EmergencyRequest};
+use focus_core::{
+    BootId, EMERGENCY_DELAY_SECONDS, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision,
+    EmergencyRequest,
+};
 use focus_storage::{FocusStore, SecurityEvent, SqliteStore};
 use rusqlite::Connection;
+
+const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
+const BOOT_A: BootId = BootId(0xaaaa);
+const BOOT_B: BootId = BootId(0xbbbb);
+
+const fn sample(boot_id: BootId, monotonic_seconds: u64, unix_seconds: u64) -> EmergencyClockSample {
+    EmergencyClockSample::new(boot_id, monotonic_seconds, unix_seconds)
+}
 
 fn temp_database(name: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -27,10 +38,21 @@ fn security_events_are_appended_to_the_protected_journal() {
 }
 
 #[test]
-fn emergency_request_survives_database_reopen_with_original_deadline() {
-    const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
+fn emergency_request_survives_database_reopen_with_verified_monotonic_progress() {
     let path = temp_database("emergency");
-    let request = EmergencyRequest::new("Need a real emergency exit", 5_000, CODE).unwrap();
+    let mut request = EmergencyRequest::new(
+        "Need a real emergency exit",
+        sample(BOOT_A, 100, 5_000),
+        CODE,
+    )
+    .unwrap();
+    let checkpoint = request.evaluate(sample(BOOT_A, 400, 5_300), CODE);
+    assert_eq!(
+        checkpoint.decision(),
+        EmergencyDecision::Waiting {
+            remaining_seconds: 300,
+        }
+    );
 
     {
         let mut store = SqliteStore::open(&path).unwrap();
@@ -38,21 +60,24 @@ fn emergency_request_survives_database_reopen_with_original_deadline() {
     }
 
     let store = SqliteStore::open(&path).unwrap();
-    let restored = store.emergency_request().unwrap().unwrap();
+    let mut restored = store.emergency_request().unwrap().unwrap();
     let _ = fs::remove_file(&path);
 
     assert_eq!(restored.reason(), request.reason());
     assert_eq!(restored.requested_at(), request.requested_at());
+    assert_eq!(restored.timing_state(), request.timing_state());
+
+    let reboot = restored.evaluate(sample(BOOT_B, 10, 50_000), CODE);
     assert_eq!(
-        restored.evaluate(5_000 + EMERGENCY_DELAY_SECONDS - 1, CODE),
+        reboot.decision(),
         EmergencyDecision::Waiting {
-            remaining_seconds: 1
+            remaining_seconds: 300,
         }
     );
-    assert_eq!(
-        restored.evaluate(5_000 + EMERGENCY_DELAY_SECONDS, CODE),
-        EmergencyDecision::Authorized
-    );
+    assert_eq!(reboot.clock_event(), EmergencyClockEvent::RebootDetected);
+
+    let completed = restored.evaluate(sample(BOOT_B, 310, 50_300), CODE);
+    assert_eq!(completed.decision(), EmergencyDecision::Authorized);
 }
 
 #[test]
@@ -69,4 +94,9 @@ fn migration_failure_is_reported_without_panicking() {
     let _ = fs::remove_file(&path);
 
     assert!(result.is_err());
+}
+
+#[test]
+fn emergency_delay_constant_remains_ten_minutes() {
+    assert_eq!(EMERGENCY_DELAY_SECONDS, 600);
 }
