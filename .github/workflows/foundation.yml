@@ -3,7 +3,7 @@ name: Foundation
 on:
   push:
     branches:
-      - main
+      - "main"
       - "agent/**"
   pull_request:
     paths:
