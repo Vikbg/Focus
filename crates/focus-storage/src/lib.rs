@@ -9,7 +9,7 @@ use focus_core::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 /// Error returned by the protected Focus store.
 #[derive(Debug)]
@@ -245,9 +245,13 @@ pub trait FocusStore {
 
     /// Persists a pending emergency request and its timing state.
     ///
+    /// The request must be bound to the currently active session. The historical
+    /// `code_hash` storage column is populated only from that active session and is never
+    /// accepted from the request or used as an authorization source.
+    ///
     /// # Errors
     ///
-    /// Returns an error if numeric fields cannot be encoded or the transaction fails.
+    /// Returns an error if the active session does not match or persistence fails.
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()>;
 
     /// Atomically persists emergency timing, an optional journal event, and an optional
@@ -255,7 +259,8 @@ pub trait FocusStore {
     ///
     /// # Errors
     ///
-    /// Returns an error if any part of the atomic observation cannot be committed.
+    /// Returns an error if the request does not match the active session or any part of
+    /// the atomic observation cannot be committed.
     fn persist_emergency_observation(
         &mut self,
         request: &EmergencyRequest,
@@ -344,6 +349,11 @@ impl SqliteStore {
 
         if version == Some(1) {
             self.migrate_v1_to_v2()?;
+            version = Some(2);
+        }
+
+        if version == Some(2) {
+            self.migrate_v2_to_v3()?;
         }
 
         self.validate_current_schema()
@@ -425,6 +435,18 @@ impl SqliteStore {
         Ok(())
     }
 
+    fn migrate_v2_to_v3(&mut self) -> StoreResult<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute_batch(
+            "
+            ALTER TABLE emergency_request ADD COLUMN session_id TEXT;
+            INSERT INTO schema_migrations(version) VALUES(3);
+            ",
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn validate_current_schema(&self) -> StoreResult<()> {
         self.validate_table_columns(
             "active_session",
@@ -452,7 +474,13 @@ impl SqliteStore {
         self.validate_table_columns("security_events", &["id", "event_type", "payload"])?;
         self.validate_table_columns(
             "emergency_request",
-            &["singleton", "reason", "requested_at", "code_hash"],
+            &[
+                "singleton",
+                "reason",
+                "requested_at",
+                "code_hash",
+                "session_id",
+            ],
         )?;
         self.validate_table_columns(
             "emergency_timing",
@@ -609,30 +637,7 @@ impl FocusStore for SqliteStore {
         transition: &ValidatedTransition,
     ) -> StoreResult<()> {
         let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "INSERT INTO session_transitions(session_id, from_state, to_state) VALUES(?1, ?2, ?3)",
-            params![
-                encode_session_id(session_id),
-                encode_state(transition.from()),
-                encode_state(transition.to()),
-            ],
-        )?;
-
-        let changed = transaction.execute(
-            "UPDATE active_session SET state = ?1
-             WHERE singleton = 1 AND session_id = ?2 AND state = ?3",
-            params![
-                encode_state(transition.to()),
-                encode_session_id(session_id),
-                encode_state(transition.from()),
-            ],
-        )?;
-
-        if changed != 1 {
-            transaction.rollback()?;
-            return Err(StoreError::StateMismatch);
-        }
-
+        persist_transition_in_transaction(&transaction, session_id, transition)?;
         transaction.commit()?;
         Ok(())
     }
@@ -656,21 +661,39 @@ impl FocusStore for SqliteStore {
         transition: Option<(SessionId, &ValidatedTransition)>,
     ) -> StoreResult<()> {
         let requested_at = encode_u64(request.requested_at())?;
-        let code_hash = request.code_hash().to_bytes();
         let timing = request.timing_state();
         let monotonic_anchor = encode_u64(timing.monotonic_anchor_nanos())?;
         let unix_anchor = encode_u64(timing.unix_anchor_seconds())?;
         let verified_elapsed = encode_u64(timing.verified_elapsed_nanos())?;
         let transaction = self.connection.transaction()?;
+        let encoded_session_id = encode_session_id(request.session_id());
+
+        let stored_hash = transaction
+            .query_row(
+                "SELECT recovery_code_hash FROM active_session
+                 WHERE singleton = 1 AND session_id = ?1",
+                params![encoded_session_id],
+                |row| row.get::<_, Option<Vec<u8>>>(0),
+            )
+            .optional()?
+            .flatten()
+            .ok_or(StoreError::StateMismatch)?;
 
         transaction.execute(
-            "INSERT INTO emergency_request(singleton, reason, requested_at, code_hash)
-             VALUES(1, ?1, ?2, ?3)
+            "INSERT INTO emergency_request(
+                singleton, reason, requested_at, code_hash, session_id
+             ) VALUES(1, ?1, ?2, ?3, ?4)
              ON CONFLICT(singleton) DO UPDATE SET
                 reason = excluded.reason,
                 requested_at = excluded.requested_at,
-                code_hash = excluded.code_hash",
-            params![request.reason(), requested_at, code_hash.as_slice()],
+                code_hash = excluded.code_hash,
+                session_id = excluded.session_id",
+            params![
+                request.reason(),
+                requested_at,
+                stored_hash,
+                encoded_session_id,
+            ],
         )?;
         transaction.execute(
             "INSERT INTO emergency_timing(
@@ -690,28 +713,11 @@ impl FocusStore for SqliteStore {
         )?;
 
         if let Some((session_id, transition)) = transition {
-            transaction.execute(
-                "INSERT INTO session_transitions(session_id, from_state, to_state)
-                 VALUES(?1, ?2, ?3)",
-                params![
-                    encode_session_id(session_id),
-                    encode_state(transition.from()),
-                    encode_state(transition.to()),
-                ],
-            )?;
-            let changed = transaction.execute(
-                "UPDATE active_session SET state = ?1
-                 WHERE singleton = 1 AND session_id = ?2 AND state = ?3",
-                params![
-                    encode_state(transition.to()),
-                    encode_session_id(session_id),
-                    encode_state(transition.from()),
-                ],
-            )?;
-            if changed != 1 {
+            if session_id != request.session_id() {
                 transaction.rollback()?;
                 return Err(StoreError::StateMismatch);
             }
+            persist_transition_in_transaction(&transaction, session_id, transition)?;
         }
 
         if let Some(event) = event {
@@ -729,20 +735,24 @@ impl FocusStore for SqliteStore {
         let request_row = self
             .connection
             .query_row(
-                "SELECT reason, requested_at, code_hash FROM emergency_request WHERE singleton = 1",
+                "SELECT session_id, reason, requested_at
+                 FROM emergency_request WHERE singleton = 1",
                 [],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, Vec<u8>>(2)?,
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
                     ))
                 },
             )
             .optional()?;
 
-        let Some((reason, requested_at, code_hash)) = request_row else {
-            return Ok(None);
+        let Some((Some(session_id), reason, requested_at)) = request_row else {
+            return match request_row {
+                None => Ok(None),
+                Some(_) => Err(StoreError::InvalidEmergencyRequest),
+            };
         };
 
         let timing_row = self
@@ -763,11 +773,6 @@ impl FocusStore for SqliteStore {
             .optional()?
             .ok_or(StoreError::InvalidEmergencyRequest)?;
 
-        let requested_at = decode_u64(requested_at)?;
-        let hash_length = code_hash.len();
-        let code_hash: [u8; 32] = code_hash
-            .try_into()
-            .map_err(|_| StoreError::InvalidRecoveryCodeHashLength(hash_length))?;
         let timing = EmergencyTimingState::restore_nanos(
             decode_boot_id(&timing_row.0)?,
             decode_u64(timing_row.1)?,
@@ -777,9 +782,9 @@ impl FocusStore for SqliteStore {
         .map_err(|_| StoreError::InvalidEmergencyRequest)?;
 
         EmergencyRequest::restore(
+            decode_session_id(&session_id)?,
             reason,
-            requested_at,
-            RecoveryCodeHash::from_bytes(code_hash),
+            decode_u64(requested_at)?,
             timing,
         )
         .map(Some)
@@ -793,6 +798,37 @@ impl FocusStore for SqliteStore {
     fn security_event_count(&self) -> StoreResult<u64> {
         count_rows(&self.connection, "security_events")
     }
+}
+
+fn persist_transition_in_transaction(
+    transaction: &rusqlite::Transaction<'_>,
+    session_id: SessionId,
+    transition: &ValidatedTransition,
+) -> StoreResult<()> {
+    transaction.execute(
+        "INSERT INTO session_transitions(session_id, from_state, to_state) VALUES(?1, ?2, ?3)",
+        params![
+            encode_session_id(session_id),
+            encode_state(transition.from()),
+            encode_state(transition.to()),
+        ],
+    )?;
+
+    let changed = transaction.execute(
+        "UPDATE active_session SET state = ?1
+         WHERE singleton = 1 AND session_id = ?2 AND state = ?3",
+        params![
+            encode_state(transition.to()),
+            encode_session_id(session_id),
+            encode_state(transition.from()),
+        ],
+    )?;
+
+    if changed != 1 {
+        return Err(StoreError::StateMismatch);
+    }
+
+    Ok(())
 }
 
 fn count_rows(connection: &Connection, table: &str) -> StoreResult<u64> {
