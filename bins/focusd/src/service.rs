@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use focus_core::{EmergencyDecision, Schedule, SessionState};
 use focus_platform::PlatformBackend;
 use focus_protocol::{
-    ReplayPolicy, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope, ResponseError,
+    ReplayPolicy, Request, RequestId, Response, ResponseEnvelope, ResponseError,
 };
 use focus_storage::{FocusStore, MutationReservation};
 
@@ -174,7 +174,8 @@ where
             Err(_) => return Response::Error(ResponseError::InternalFailure),
         };
 
-        let evaluation = match evaluate_linux_emergency_unlock(&mut self.store, &mut request, code) {
+        let evaluation = match evaluate_linux_emergency_unlock(&mut self.store, &mut request, code)
+        {
             Ok(evaluation) => evaluation,
             Err(error) => return map_emergency_error(error),
         };
@@ -222,7 +223,9 @@ fn map_emergency_error(error: LinuxEmergencyError) -> Response {
     match error {
         LinuxEmergencyError::Domain(_)
         | LinuxEmergencyError::NoActiveSession
-        | LinuxEmergencyError::InvalidSessionState(_) => Response::Error(ResponseError::InvalidRequest),
+        | LinuxEmergencyError::InvalidSessionState(_) => {
+            Response::Error(ResponseError::InvalidRequest)
+        }
         LinuxEmergencyError::Clock(_)
         | LinuxEmergencyError::Store(_)
         | LinuxEmergencyError::Transition(_)
