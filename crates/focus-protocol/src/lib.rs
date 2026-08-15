@@ -57,7 +57,16 @@ pub enum Request {
 impl Request {
     const fn allowed_for(self, client: ClientKind) -> bool {
         match client {
-            ClientKind::Desktop | ClientKind::Cli => true,
+            ClientKind::Desktop => true,
+            ClientKind::Cli => matches!(
+                self,
+                Self::GetStatus
+                    | Self::GetSession
+                    | Self::Doctor
+                    | Self::GetVpnList
+                    | Self::VpnUp { .. }
+                    | Self::VpnDown { .. }
+            ),
             ClientKind::BrowserBridge | ClientKind::Classifier => {
                 matches!(self, Self::GetStatus)
             }
@@ -340,7 +349,7 @@ impl RequestEnvelope {
 
     /// Returns whether the authenticated peer identity matches the claim and may issue this request.
     #[must_use]
-    pub const fn is_authorized_as(self, authenticated_client: ClientKind) -> bool {
+    pub fn is_authorized_as(self, authenticated_client: ClientKind) -> bool {
         self.client == authenticated_client && self.request.allowed_for(authenticated_client)
     }
 }
