@@ -2,8 +2,12 @@
 
 use std::{error::Error, fmt};
 
+use focus_core::ProfileId;
+
 /// Current version of the local Focus IPC protocol.
 pub const PROTOCOL_VERSION: u16 = 1;
+/// Maximum accepted size of one newline-free IPC frame.
+pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 
 /// Correlates an IPC response with its originating request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,14 +43,34 @@ impl ClientKind {
     }
 }
 
-/// Initial request set supported by the Focus daemon protocol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Typed request payload for starting a protected Focus session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartSessionRequest {
+    pub profile_id: ProfileId,
+    pub minimum_duration_secs: u64,
+    pub objective: String,
+}
+
+/// Typed reason supplied when entering the emergency unlock workflow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmergencyRequestPayload {
+    pub reason: String,
+}
+
+/// Typed recovery code submission for an already pending emergency request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmergencyCodePayload {
+    pub code: String,
+}
+
+/// Request set supported by the Focus daemon protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     GetStatus,
-    StartSession,
+    StartSession(StartSessionRequest),
     GetSession,
-    RequestEmergencyUnlock,
-    SubmitEmergencyCode,
+    RequestEmergencyUnlock(EmergencyRequestPayload),
+    SubmitEmergencyCode(EmergencyCodePayload),
     GetProfiles,
     Doctor,
     GetVpnList,
@@ -55,7 +79,7 @@ pub enum Request {
 }
 
 impl Request {
-    const fn allowed_for(self, client: ClientKind) -> bool {
+    const fn allowed_for(&self, client: ClientKind) -> bool {
         match client {
             ClientKind::Desktop => true,
             ClientKind::Cli => matches!(
@@ -73,18 +97,28 @@ impl Request {
         }
     }
 
-    const fn wire_parts(self) -> (&'static str, Option<u128>) {
+    fn wire_parts(&self) -> (&'static str, String) {
         match self {
-            Self::GetStatus => ("status", None),
-            Self::StartSession => ("start-session", None),
-            Self::GetSession => ("session", None),
-            Self::RequestEmergencyUnlock => ("emergency-request", None),
-            Self::SubmitEmergencyCode => ("emergency-code", None),
-            Self::GetProfiles => ("profiles", None),
-            Self::Doctor => ("doctor", None),
-            Self::GetVpnList => ("vpn-list", None),
-            Self::VpnUp { id } => ("vpn-up", Some(id)),
-            Self::VpnDown { id } => ("vpn-down", Some(id)),
+            Self::GetStatus => ("status", "-".to_owned()),
+            Self::StartSession(payload) => (
+                "start-session",
+                format!(
+                    "{},{},{}",
+                    payload.profile_id.0,
+                    payload.minimum_duration_secs,
+                    encode_text(&payload.objective)
+                ),
+            ),
+            Self::GetSession => ("session", "-".to_owned()),
+            Self::RequestEmergencyUnlock(payload) => {
+                ("emergency-request", encode_text(&payload.reason))
+            }
+            Self::SubmitEmergencyCode(payload) => ("emergency-code", encode_text(&payload.code)),
+            Self::GetProfiles => ("profiles", "-".to_owned()),
+            Self::Doctor => ("doctor", "-".to_owned()),
+            Self::GetVpnList => ("vpn-list", "-".to_owned()),
+            Self::VpnUp { id } => ("vpn-up", id.to_string()),
+            Self::VpnDown { id } => ("vpn-down", id.to_string()),
         }
     }
 
@@ -103,21 +137,34 @@ impl Request {
                 Ok(Self::GetStatus)
             }
             "start-session" => {
-                no_argument()?;
-                Ok(Self::StartSession)
+                let mut fields = argument.splitn(3, ',');
+                let profile_id = fields
+                    .next()
+                    .ok_or(WireError::Malformed)?
+                    .parse()
+                    .map_err(|_| WireError::InvalidArgument)?;
+                let minimum_duration_secs = fields
+                    .next()
+                    .ok_or(WireError::Malformed)?
+                    .parse()
+                    .map_err(|_| WireError::InvalidArgument)?;
+                let objective = decode_text(fields.next().ok_or(WireError::Malformed)?)?;
+                Ok(Self::StartSession(StartSessionRequest {
+                    profile_id: ProfileId(profile_id),
+                    minimum_duration_secs,
+                    objective,
+                }))
             }
             "session" => {
                 no_argument()?;
                 Ok(Self::GetSession)
             }
-            "emergency-request" => {
-                no_argument()?;
-                Ok(Self::RequestEmergencyUnlock)
-            }
-            "emergency-code" => {
-                no_argument()?;
-                Ok(Self::SubmitEmergencyCode)
-            }
+            "emergency-request" => Ok(Self::RequestEmergencyUnlock(EmergencyRequestPayload {
+                reason: decode_text(argument)?,
+            })),
+            "emergency-code" => Ok(Self::SubmitEmergencyCode(EmergencyCodePayload {
+                code: decode_text(argument)?,
+            })),
             "profiles" => {
                 no_argument()?;
                 Ok(Self::GetProfiles)
@@ -138,6 +185,40 @@ impl Request {
             }),
             _ => Err(WireError::UnknownRequest),
         }
+    }
+}
+
+fn encode_text(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(value.len() * 2);
+    for byte in value.as_bytes() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
+fn decode_text(value: &str) -> Result<String, WireError> {
+    if !value.len().is_multiple_of(2) {
+        return Err(WireError::InvalidArgument);
+    }
+
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks_exact(2) {
+        let high = decode_hex_nibble(pair[0]).ok_or(WireError::InvalidArgument)?;
+        let low = decode_hex_nibble(pair[1]).ok_or(WireError::InvalidArgument)?;
+        decoded.push((high << 4) | low);
+    }
+    String::from_utf8(decoded).map_err(|_| WireError::InvalidArgument)
+}
+
+const fn decode_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -235,6 +316,7 @@ impl ResponseError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireError {
     Malformed,
+    FrameTooLarge,
     InvalidVersion,
     InvalidRequestId,
     UnknownClient,
@@ -252,7 +334,7 @@ impl fmt::Display for WireError {
 impl Error for WireError {}
 
 /// Versioned envelope sent from an IPC client to `focusd`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestEnvelope {
     protocol_version: u16,
     request_id: RequestId,
@@ -263,7 +345,7 @@ pub struct RequestEnvelope {
 impl RequestEnvelope {
     /// Creates an envelope using the current protocol version.
     #[must_use]
-    pub const fn new(request_id: RequestId, client: ClientKind, request: Request) -> Self {
+    pub fn new(request_id: RequestId, client: ClientKind, request: Request) -> Self {
         Self {
             protocol_version: PROTOCOL_VERSION,
             request_id,
@@ -276,8 +358,11 @@ impl RequestEnvelope {
     ///
     /// # Errors
     ///
-    /// Returns [`WireError`] when the frame is malformed or contains unknown fields.
+    /// Returns [`WireError`] when the frame is too large, malformed, or contains unknown fields.
     pub fn decode(line: &str) -> Result<Self, WireError> {
+        if line.len() > MAX_FRAME_BYTES {
+            return Err(WireError::FrameTooLarge);
+        }
         let parts: Vec<_> = line.split('|').collect();
         if parts.len() != 5 {
             return Err(WireError::Malformed);
@@ -298,9 +383,8 @@ impl RequestEnvelope {
 
     /// Encodes this request as one newline-free frame.
     #[must_use]
-    pub fn encode(self) -> String {
+    pub fn encode(&self) -> String {
         let (request, argument) = self.request.wire_parts();
-        let argument = argument.map_or_else(|| "-".to_owned(), |value| value.to_string());
         format!(
             "{}|{}|{}|{}|{}",
             self.protocol_version,
@@ -313,43 +397,49 @@ impl RequestEnvelope {
 
     /// Returns the protocol version carried by this request.
     #[must_use]
-    pub const fn protocol_version(self) -> u16 {
+    pub const fn protocol_version(&self) -> u16 {
         self.protocol_version
     }
 
     /// Returns whether this frame uses the current protocol version.
     #[must_use]
-    pub const fn is_compatible(self) -> bool {
+    pub const fn is_compatible(&self) -> bool {
         self.protocol_version == PROTOCOL_VERSION
     }
 
     /// Returns the request identifier.
     #[must_use]
-    pub const fn request_id(self) -> RequestId {
+    pub const fn request_id(&self) -> RequestId {
         self.request_id
     }
 
     /// Returns the sending client kind.
     #[must_use]
-    pub const fn client(self) -> ClientKind {
+    pub const fn client(&self) -> ClientKind {
         self.client
     }
 
-    /// Returns the request payload discriminator.
+    /// Returns a clone of the typed request payload.
     #[must_use]
-    pub const fn request(self) -> Request {
+    pub fn request(&self) -> Request {
+        self.request.clone()
+    }
+
+    /// Consumes the envelope and returns its typed request payload.
+    #[must_use]
+    pub fn into_request(self) -> Request {
         self.request
     }
 
     /// Returns whether the claimed client kind may issue this request class.
     #[must_use]
-    pub const fn is_authorized(self) -> bool {
+    pub const fn is_authorized(&self) -> bool {
         self.request.allowed_for(self.client)
     }
 
     /// Returns whether the authenticated peer identity matches the claim and may issue this request.
     #[must_use]
-    pub fn is_authorized_as(self, authenticated_client: ClientKind) -> bool {
+    pub fn is_authorized_as(&self, authenticated_client: ClientKind) -> bool {
         self.client == authenticated_client && self.request.allowed_for(authenticated_client)
     }
 }
@@ -377,8 +467,11 @@ impl ResponseEnvelope {
     ///
     /// # Errors
     ///
-    /// Returns [`WireError`] when the frame is malformed or contains unknown fields.
+    /// Returns [`WireError`] when the frame is too large, malformed, or contains unknown fields.
     pub fn decode(line: &str) -> Result<Self, WireError> {
+        if line.len() > MAX_FRAME_BYTES {
+            return Err(WireError::FrameTooLarge);
+        }
         let parts: Vec<_> = line.split('|').collect();
         if parts.len() != 5 {
             return Err(WireError::Malformed);
