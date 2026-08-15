@@ -116,6 +116,7 @@ pub struct SecurityEvent {
 }
 
 impl SecurityEvent {
+    /// Creates one security journal event.
     #[must_use]
     pub fn new(event_type: impl Into<String>, payload: Vec<u8>) -> Self {
         Self {
@@ -142,6 +143,7 @@ pub struct Transition {
 }
 
 impl Transition {
+    /// Creates a transition record.
     #[must_use]
     pub const fn new(session_id: SessionId, from: SessionState, to: SessionState) -> Self {
         Self {
@@ -164,6 +166,7 @@ pub struct StoredActiveSession {
 }
 
 impl StoredActiveSession {
+    /// Creates a complete active-session record.
     #[must_use]
     pub const fn new(
         id: SessionId,
@@ -227,16 +230,46 @@ impl StoredActiveSession {
 
 /// Domain-specific storage operations required by the session engine.
 pub trait FocusStore {
+    /// Returns the currently active protected session, if one exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the store cannot be queried or persisted session data is invalid.
     fn active_session(&self) -> StoreResult<Option<StoredActiveSession>>;
 
+    /// Replaces the complete active-session record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the record cannot be encoded or persisted.
     fn set_active_session(&mut self, session: &StoredActiveSession) -> StoreResult<()>;
 
+    /// Atomically journals and applies one session-state transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the stored source state does not match or the transaction fails.
     fn persist_transition(&mut self, transition: &Transition) -> StoreResult<()>;
 
+    /// Appends one security-relevant event to the protected journal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the event cannot be persisted.
     fn append_security_event(&mut self, event: &SecurityEvent) -> StoreResult<()>;
 
+    /// Persists a pending emergency request and its timing state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if numeric fields cannot be encoded or the transaction fails.
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()>;
 
+    /// Atomically persists emergency timing, an optional journal event, and an optional transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any part of the atomic observation cannot be committed.
     fn persist_emergency_observation(
         &mut self,
         request: &EmergencyRequest,
@@ -244,10 +277,25 @@ pub trait FocusStore {
         transition: Option<&Transition>,
     ) -> StoreResult<()>;
 
+    /// Restores the pending emergency request, if one exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if persisted emergency state is incomplete or invalid.
     fn emergency_request(&self) -> StoreResult<Option<EmergencyRequest>>;
 
+    /// Returns the number of committed state transitions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transition journal cannot be queried.
     fn transition_count(&self) -> StoreResult<u64>;
 
+    /// Returns the number of committed security events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the security journal cannot be queried.
     fn security_event_count(&self) -> StoreResult<u64>;
 }
 
@@ -295,10 +343,10 @@ impl SqliteStore {
                     row.get::<_, Option<i64>>(0)
                 })?;
 
-        if let Some(current) = version {
-            if current > CURRENT_SCHEMA_VERSION {
-                return Err(StoreError::UnsupportedSchemaVersion(current));
-            }
+        if let Some(current) = version
+            && current > CURRENT_SCHEMA_VERSION
+        {
+            return Err(StoreError::UnsupportedSchemaVersion(current));
         }
 
         if version.is_none() {
