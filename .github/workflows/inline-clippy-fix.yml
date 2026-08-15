@@ -1,0 +1,56 @@
+name: Inline Clippy Fix
+
+on:
+  push:
+    branches:
+      - agent/audit-remediation-inline
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/audit-remediation-inline
+          fetch-depth: 0
+      - name: Apply exact pass-by-value lint fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/focus-storage/src/lib.rs')
+          text = path.read_text()
+          old = '''fn persist_transition_in_transaction(
+              transaction: &rusqlite::Transaction<'_>,
+              session_id: SessionId,
+              transition: &ValidatedTransition,
+          ) -> StoreResult<()> {'''
+          new = '''fn persist_transition_in_transaction(
+              transaction: &rusqlite::Transaction<'_>,
+              session_id: SessionId,
+              transition: ValidatedTransition,
+          ) -> StoreResult<()> {'''
+          if old not in text:
+              raise SystemExit('target helper signature not found')
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              'persist_transition_in_transaction(&transaction, session_id, transition)?;',
+              'persist_transition_in_transaction(&transaction, session_id, *transition)?;',
+          )
+          path.write_text(text)
+          PY
+      - name: Install Rust stable with rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format and push
+        run: |
+          cargo fmt --all
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/focus-storage/src/lib.rs
+          git commit -m "fix: pass validated transition by value"
+          git push origin HEAD:agent/audit-remediation-inline
