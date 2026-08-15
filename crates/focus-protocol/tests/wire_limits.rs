@@ -50,7 +50,10 @@ fn arbitrary_utf8_input_never_panics_decoders() {
         let input = String::from_utf8_lossy(&bytes);
         let request_result = std::panic::catch_unwind(|| RequestEnvelope::decode(&input));
         let response_result = std::panic::catch_unwind(|| ResponseEnvelope::decode(&input));
-        assert!(request_result.is_ok(), "request decoder panicked for {input:?}");
+        assert!(
+            request_result.is_ok(),
+            "request decoder panicked for {input:?}"
+        );
         assert!(
             response_result.is_ok(),
             "response decoder panicked for {input:?}"
