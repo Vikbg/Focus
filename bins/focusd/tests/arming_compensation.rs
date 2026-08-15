@@ -55,13 +55,19 @@ fn every_arm_stage_failure_compensates_exactly_the_applied_prefix() {
         backend.fail_guard(failing_guard);
         let session = session(500 + index as u128);
 
-        let result = block_on_ready(arm_session(&mut store, &mut backend, &session));
+        let error = block_on_ready(arm_session(&mut store, &mut backend, &session)).unwrap_err();
 
-        assert!(result.is_err());
         let expected_armed = &GUARDS[..index];
         let expected_disarmed = expected_armed.iter().rev().copied().collect::<Vec<_>>();
         assert_eq!(backend.armed(), expected_armed);
         assert_eq!(backend.disarmed(), expected_disarmed.as_slice());
+        assert!(
+            error
+                .compensation_report()
+                .unwrap()
+                .remaining_guards()
+                .is_empty()
+        );
         assert_eq!(
             store.active_session().unwrap().unwrap().state(),
             SessionState::ProtectionFailure
@@ -79,11 +85,17 @@ fn every_verification_failure_compensates_all_armed_guards_in_reverse_order() {
         backend.fail_verification(failing_guard);
         let session = session(510 + index as u128);
 
-        let result = block_on_ready(arm_session(&mut store, &mut backend, &session));
+        let error = block_on_ready(arm_session(&mut store, &mut backend, &session)).unwrap_err();
 
-        assert!(result.is_err());
         assert_eq!(backend.armed(), GUARDS.as_slice());
         assert_eq!(backend.disarmed(), expected_disarmed.as_slice());
+        assert!(
+            error
+                .compensation_report()
+                .unwrap()
+                .remaining_guards()
+                .is_empty()
+        );
         assert_eq!(
             store.active_session().unwrap().unwrap().state(),
             SessionState::ProtectionFailure
@@ -120,9 +132,15 @@ fn compensation_failure_still_persists_protection_failure_and_reports_remaining_
     backend.fail_disarm(GuardKind::Network);
     let session = session(520);
 
-    let result = block_on_ready(arm_session(&mut store, &mut backend, &session));
+    let error = block_on_ready(arm_session(&mut store, &mut backend, &session)).unwrap_err();
 
-    assert!(result.is_err());
+    assert_eq!(
+        error
+            .compensation_report()
+            .unwrap()
+            .remaining_guards(),
+        &[GuardKind::Network]
+    );
     assert_eq!(
         store.active_session().unwrap().unwrap().state(),
         SessionState::ProtectionFailure
@@ -146,9 +164,15 @@ fn close_blocked_apps_failure_persists_protection_failure_without_disarming_guar
     backend.fail_close_blocked_apps();
     let session = session(521);
 
-    let result = block_on_ready(arm_session(&mut store, &mut backend, &session));
+    let error = block_on_ready(arm_session(&mut store, &mut backend, &session)).unwrap_err();
 
-    assert!(result.is_err());
+    assert!(
+        error
+            .compensation_report()
+            .unwrap()
+            .remaining_guards()
+            .is_empty()
+    );
     assert!(backend.armed().is_empty());
     assert!(backend.disarmed().is_empty());
     assert_eq!(
