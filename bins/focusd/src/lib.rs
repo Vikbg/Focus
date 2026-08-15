@@ -46,7 +46,7 @@ fn handle_line(line: &str, state: DaemonState) -> String {
         return "Error: unauthorized\n".to_owned();
     }
 
-    format!("Focus daemon: running | State: {}\n", state_name(state))
+    format!("Focus daemon: running\nState: {}\n", state_name(state))
 }
 
 const fn state_name(state: DaemonState) -> &'static str {
