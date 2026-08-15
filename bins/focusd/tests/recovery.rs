@@ -22,39 +22,39 @@ fn block_on_ready<F: Future>(future: F) -> F::Output {
 
 #[derive(Default)]
 struct RecordingBackend {
-    preflight_calls: usize,
-    close_calls: usize,
-    arm_calls: usize,
-    verify_calls: usize,
+    preflight: usize,
+    close: usize,
+    arm: usize,
+    verify: usize,
 }
 
 impl PlatformBackend for RecordingBackend {
     fn preflight(&mut self) -> PlatformFuture<'_, ()> {
-        self.preflight_calls += 1;
+        self.preflight += 1;
         Box::pin(async { Ok(()) })
     }
 
     fn close_blocked_apps(&mut self) -> PlatformFuture<'_, ()> {
-        self.close_calls += 1;
+        self.close += 1;
         Box::pin(async { Ok(()) })
     }
 
     fn arm_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
-        self.arm_calls += 1;
+        self.arm += 1;
         Box::pin(async { Ok(()) })
     }
 
     fn verify_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
-        self.verify_calls += 1;
+        self.verify += 1;
         Box::pin(async { Ok(()) })
     }
 }
 
 fn assert_complete_recovery(backend: &RecordingBackend) {
-    assert_eq!(backend.preflight_calls, 1);
-    assert_eq!(backend.close_calls, 1);
-    assert_eq!(backend.arm_calls, 4);
-    assert_eq!(backend.verify_calls, 4);
+    assert_eq!(backend.preflight, 1);
+    assert_eq!(backend.close, 1);
+    assert_eq!(backend.arm, 4);
+    assert_eq!(backend.verify, 4);
 }
 
 #[test]
