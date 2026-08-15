@@ -4,9 +4,7 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-use focus_core::{
-    Decision, PolicySet, PolicyVersion, Profile, ProfileId, SessionId, SessionState,
-};
+use focus_core::{Decision, PolicySet, PolicyVersion, Profile, ProfileId, SessionId, SessionState};
 use focus_platform::{FakeBackend, GuardKind, PlatformError};
 use focus_storage::{FocusStore, SqliteStore};
 use focusd::{ArmError, arm_session};
