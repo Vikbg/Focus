@@ -11,5 +11,8 @@ focus-platform = { path = "../../crates/focus-platform" }
 focus-protocol = { path = "../../crates/focus-protocol" }
 focus-storage = { path = "../../crates/focus-storage" }
 
+[dev-dependencies]
+focusctl = { path = "../focusctl" }
+
 [lints]
 workspace = true
