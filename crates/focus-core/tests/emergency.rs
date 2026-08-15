@@ -6,6 +6,7 @@ use focus_core::{
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
 const BOOT_A: BootId = BootId(0xaaaa);
 const BOOT_B: BootId = BootId(0xbbbb);
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 const fn sample(
     boot_id: BootId,
@@ -13,6 +14,14 @@ const fn sample(
     unix_seconds: u64,
 ) -> EmergencyClockSample {
     EmergencyClockSample::new(boot_id, monotonic_seconds, unix_seconds)
+}
+
+const fn sample_nanos(
+    boot_id: BootId,
+    monotonic_nanos: u64,
+    unix_seconds: u64,
+) -> EmergencyClockSample {
+    EmergencyClockSample::new_nanos(boot_id, monotonic_nanos, unix_seconds)
 }
 
 #[test]
@@ -78,6 +87,27 @@ fn backward_wall_clock_jump_does_not_reset_or_advance_emergency_delay() {
     assert_eq!(
         evaluation.clock_event(),
         EmergencyClockEvent::WallClockAnomaly
+    );
+}
+
+#[test]
+fn correct_code_before_600_real_seconds_is_denied_even_across_second_boundaries() {
+    let start = 100 * NANOS_PER_SECOND + 900_000_000;
+    let before_deadline = 700 * NANOS_PER_SECOND + 100_000_000;
+    let mut request = EmergencyRequest::new(
+        "Need to leave for a real emergency",
+        sample_nanos(BOOT_A, start, 1_000),
+        CODE,
+    )
+    .unwrap();
+
+    let evaluation = request.evaluate(sample_nanos(BOOT_A, before_deadline, 1_599), CODE);
+
+    assert_eq!(
+        evaluation.decision(),
+        EmergencyDecision::Waiting {
+            remaining_seconds: 1,
+        }
     );
 }
 
