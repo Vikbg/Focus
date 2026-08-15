@@ -303,7 +303,11 @@ impl SqliteStore {
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<Result<Vec<_>, _>>()?;
 
-        if columns.iter().map(String::as_str).eq(expected.iter().copied()) {
+        if columns
+            .iter()
+            .map(String::as_str)
+            .eq(expected.iter().copied())
+        {
             return Ok(());
         }
 
