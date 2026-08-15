@@ -32,7 +32,9 @@ impl fmt::Display for ClockSampleError {
             Self::InvalidBootId => formatter.write_str("invalid Linux boot id"),
             Self::InvalidUptime => formatter.write_str("invalid Linux uptime"),
             Self::InvalidMonotonicTime => formatter.write_str("invalid Linux monotonic time"),
-            Self::MonotonicClock(error) => write!(formatter, "Linux monotonic clock error: {error}"),
+            Self::MonotonicClock(error) => {
+                write!(formatter, "Linux monotonic clock error: {error}")
+            }
             Self::SystemTimeBeforeEpoch => {
                 formatter.write_str("system clock is before the Unix epoch")
             }
@@ -104,8 +106,10 @@ pub fn parse_uptime_seconds(input: &str) -> Result<u64, ClockSampleError> {
 
 fn boottime_nanos() -> Result<u64, ClockSampleError> {
     let time = clock_gettime(ClockId::CLOCK_BOOTTIME).map_err(ClockSampleError::MonotonicClock)?;
-    let seconds = u64::try_from(time.tv_sec()).map_err(|_| ClockSampleError::InvalidMonotonicTime)?;
-    let nanos = u64::try_from(time.tv_nsec()).map_err(|_| ClockSampleError::InvalidMonotonicTime)?;
+    let seconds =
+        u64::try_from(time.tv_sec()).map_err(|_| ClockSampleError::InvalidMonotonicTime)?;
+    let nanos =
+        u64::try_from(time.tv_nsec()).map_err(|_| ClockSampleError::InvalidMonotonicTime)?;
     if nanos >= NANOS_PER_SECOND {
         return Err(ClockSampleError::InvalidMonotonicTime);
     }
