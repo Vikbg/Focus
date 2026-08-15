@@ -2,9 +2,10 @@ use std::sync::{Arc, RwLock};
 
 use focus_core::{Schedule, SessionState};
 use focus_platform::PlatformBackend;
+use focus_protocol::{Request, Response};
 use focus_storage::FocusStore;
 
-use crate::{RecoveryError, recover_session};
+use crate::{RecoveryError, recover_session, response_for};
 
 /// Daemon-owned health summary for the currently protected session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +88,14 @@ where
         let state = recover_session(&mut self.store, &mut self.backend).await?;
         self.publish_state(state);
         Ok(state)
+    }
+
+    /// Routes one authenticated request through the authoritative service path.
+    ///
+    /// State-changing payloads that are not yet representable by the P1 protocol
+    /// remain unsupported until their typed request data is introduced.
+    pub async fn handle(&mut self, request: Request) -> Response {
+        response_for(request, self.state)
     }
 
     #[must_use]
