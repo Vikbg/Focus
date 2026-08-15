@@ -5,10 +5,11 @@ use std::{
 };
 
 use focus_core::{
-    BootId, EMERGENCY_DELAY_SECONDS, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision,
-    EmergencyRequest,
+    BootId, Decision, EMERGENCY_DELAY_SECONDS, EmergencyClockEvent, EmergencyClockSample,
+    EmergencyDecision, EmergencyRequest, PolicySet, PolicyVersion, Profile, ProfileId,
+    RecoveryCodeHash, SessionId, SessionState,
 };
-use focus_storage::{FocusStore, SecurityEvent, SqliteStore};
+use focus_storage::{FocusStore, SecurityEvent, SqliteStore, StoredActiveSession};
 use rusqlite::Connection;
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
@@ -31,6 +32,22 @@ fn temp_database(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("focus-{name}-{nonce}.db"))
 }
 
+fn stored_session(id: u128) -> StoredActiveSession {
+    StoredActiveSession::new(
+        SessionId(id),
+        SessionState::EmergencyPending,
+        Profile::new(
+            ProfileId(7),
+            PolicyVersion(3),
+            PolicySet::new(Decision::Allow),
+        )
+        .snapshot(),
+        1_000,
+        2_000,
+        RecoveryCodeHash::from_code(CODE),
+    )
+}
+
 #[test]
 fn security_events_are_appended_to_the_protected_journal() {
     let mut store = SqliteStore::open_in_memory().unwrap();
@@ -45,16 +62,22 @@ fn security_events_are_appended_to_the_protected_journal() {
 fn failed_security_journal_write_rolls_back_emergency_timing() {
     let path = temp_database("atomic-emergency-observation");
     let mut store = SqliteStore::open(&path).unwrap();
+    let session = stored_session(42);
+    store.set_active_session(&session).unwrap();
     let original = EmergencyRequest::new(
+        session.id(),
         "Need a real emergency exit",
         sample(BOOT_A, 100, 1_000),
-        CODE,
     )
     .unwrap();
     store.persist_emergency_request(&original).unwrap();
 
     let mut candidate = original.clone();
-    let evaluation = candidate.evaluate(sample(BOOT_A, 160, 1_600), CODE);
+    let evaluation = candidate.evaluate(
+        sample(BOOT_A, 160, 1_600),
+        session.recovery_code_hash(),
+        CODE,
+    );
     assert_eq!(
         evaluation.clock_event(),
         EmergencyClockEvent::WallClockAnomaly
@@ -87,13 +110,18 @@ fn failed_security_journal_write_rolls_back_emergency_timing() {
 #[test]
 fn emergency_request_survives_database_reopen_with_verified_monotonic_progress() {
     let path = temp_database("emergency");
+    let session = stored_session(43);
     let mut request = EmergencyRequest::new(
+        session.id(),
         "Need a real emergency exit",
         sample(BOOT_A, 100, 5_000),
-        CODE,
     )
     .unwrap();
-    let checkpoint = request.evaluate(sample(BOOT_A, 400, 5_300), CODE);
+    let checkpoint = request.evaluate(
+        sample(BOOT_A, 400, 5_300),
+        session.recovery_code_hash(),
+        CODE,
+    );
     assert_eq!(
         checkpoint.decision(),
         EmergencyDecision::Waiting {
@@ -103,18 +131,23 @@ fn emergency_request_survives_database_reopen_with_verified_monotonic_progress()
 
     {
         let mut store = SqliteStore::open(&path).unwrap();
+        store.set_active_session(&session).unwrap();
         store.persist_emergency_request(&request).unwrap();
     }
 
     let store = SqliteStore::open(&path).unwrap();
     let mut restored = store.emergency_request().unwrap().unwrap();
-    let _ = fs::remove_file(&path);
 
+    assert_eq!(restored.session_id(), request.session_id());
     assert_eq!(restored.reason(), request.reason());
     assert_eq!(restored.requested_at(), request.requested_at());
     assert_eq!(restored.timing_state(), request.timing_state());
 
-    let reboot = restored.evaluate(sample(BOOT_B, 10, 50_000), CODE);
+    let reboot = restored.evaluate(
+        sample(BOOT_B, 10, 50_000),
+        session.recovery_code_hash(),
+        CODE,
+    );
     assert_eq!(
         reboot.decision(),
         EmergencyDecision::Waiting {
@@ -123,8 +156,15 @@ fn emergency_request_survives_database_reopen_with_verified_monotonic_progress()
     );
     assert_eq!(reboot.clock_event(), EmergencyClockEvent::RebootDetected);
 
-    let completed = restored.evaluate(sample(BOOT_B, 310, 50_300), CODE);
+    let completed = restored.evaluate(
+        sample(BOOT_B, 310, 50_300),
+        session.recovery_code_hash(),
+        CODE,
+    );
     assert_eq!(completed.decision(), EmergencyDecision::Authorized);
+
+    drop(store);
+    let _ = fs::remove_file(&path);
 }
 
 #[test]
