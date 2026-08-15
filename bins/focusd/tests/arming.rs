@@ -51,7 +51,7 @@ fn network_guard_failure_prevents_locked_state() {
     let error = block_on_ready(arm_session(&mut store, &mut backend, &session)).unwrap_err();
 
     assert!(matches!(
-        error,
+        &error,
         ArmError::ArmingFailed {
             source: PlatformError::GuardFailed(GuardKind::Network),
             ..
