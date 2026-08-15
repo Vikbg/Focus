@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use focus_storage::{FocusStore, MutationReservation, SqliteStore};
 
@@ -13,23 +17,30 @@ fn temp_database() -> PathBuf {
 #[test]
 fn mutation_reservation_survives_reconnect_and_restart() {
     let path = temp_database();
+    let fingerprint = b"emergency-request|reason-a";
 
     {
         let mut store = SqliteStore::open(&path).unwrap();
         assert_eq!(
-            store.reserve_mutation(42).unwrap(),
+            store.reserve_mutation(42, fingerprint).unwrap(),
             MutationReservation::Started
         );
         assert_eq!(
-            store.reserve_mutation(42).unwrap(),
+            store.reserve_mutation(42, fingerprint).unwrap(),
             MutationReservation::InProgress
+        );
+        assert_eq!(
+            store
+                .reserve_mutation(42, b"emergency-request|reason-b")
+                .unwrap(),
+            MutationReservation::Conflict
         );
     }
 
     {
         let mut reopened = SqliteStore::open(&path).unwrap();
         assert_eq!(
-            reopened.reserve_mutation(42).unwrap(),
+            reopened.reserve_mutation(42, fingerprint).unwrap(),
             MutationReservation::InProgress
         );
         reopened.complete_mutation(42, b"1|42|status|Idle|-").unwrap();
@@ -38,8 +49,14 @@ fn mutation_reservation_survives_reconnect_and_restart() {
     {
         let mut reopened = SqliteStore::open(&path).unwrap();
         assert_eq!(
-            reopened.reserve_mutation(42).unwrap(),
+            reopened.reserve_mutation(42, fingerprint).unwrap(),
             MutationReservation::Completed(b"1|42|status|Idle|-".to_vec())
+        );
+        assert_eq!(
+            reopened
+                .reserve_mutation(42, b"emergency-request|reason-b")
+                .unwrap(),
+            MutationReservation::Conflict
         );
     }
 
