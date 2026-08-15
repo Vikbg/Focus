@@ -179,6 +179,21 @@ pub trait FocusStore {
     /// Returns an error when a numeric field cannot be represented or the transaction fails.
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()>;
 
+    /// Atomically persists one emergency timing observation with its security event and
+    /// optional protection-state transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::StateMismatch`] when the optional transition no longer matches
+    /// the active session. Other database failures are returned without committing any part
+    /// of the observation.
+    fn persist_emergency_observation(
+        &mut self,
+        request: &EmergencyRequest,
+        event: Option<&SecurityEvent>,
+        transition: Option<&Transition>,
+    ) -> StoreResult<()>;
+
     /// Restores the pending emergency unlock request, if one exists.
     ///
     /// # Errors
@@ -413,12 +428,21 @@ impl FocusStore for SqliteStore {
     }
 
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()> {
+        self.persist_emergency_observation(request, None, None)
+    }
+
+    fn persist_emergency_observation(
+        &mut self,
+        request: &EmergencyRequest,
+        event: Option<&SecurityEvent>,
+        transition: Option<&Transition>,
+    ) -> StoreResult<()> {
         let requested_at = encode_u64(request.requested_at())?;
         let code_hash = request.code_hash().to_bytes();
         let timing = request.timing_state();
-        let monotonic_anchor = encode_u64(timing.monotonic_anchor_seconds())?;
+        let monotonic_anchor = encode_u64(timing.monotonic_anchor_nanos())?;
         let unix_anchor = encode_u64(timing.unix_anchor_seconds())?;
-        let verified_elapsed = encode_u64(timing.verified_elapsed_seconds())?;
+        let verified_elapsed = encode_u64(timing.verified_elapsed_nanos())?;
         let transaction = self.connection.transaction()?;
 
         transaction.execute(
@@ -446,6 +470,39 @@ impl FocusStore for SqliteStore {
                 verified_elapsed
             ],
         )?;
+
+        if let Some(transition) = transition {
+            transaction.execute(
+                "INSERT INTO session_transitions(session_id, from_state, to_state)
+                 VALUES(?1, ?2, ?3)",
+                params![
+                    encode_session_id(transition.session_id),
+                    encode_state(transition.from),
+                    encode_state(transition.to)
+                ],
+            )?;
+            let changed = transaction.execute(
+                "UPDATE active_session SET state = ?1
+                 WHERE singleton = 1 AND session_id = ?2 AND state = ?3",
+                params![
+                    encode_state(transition.to),
+                    encode_session_id(transition.session_id),
+                    encode_state(transition.from)
+                ],
+            )?;
+            if changed != 1 {
+                transaction.rollback()?;
+                return Err(StoreError::StateMismatch);
+            }
+        }
+
+        if let Some(event) = event {
+            transaction.execute(
+                "INSERT INTO security_events(event_type, payload) VALUES(?1, ?2)",
+                params![event.event_type(), event.payload()],
+            )?;
+        }
+
         transaction.commit()?;
         Ok(())
     }
@@ -493,7 +550,7 @@ impl FocusStore for SqliteStore {
         let code_hash: [u8; 32] = code_hash
             .try_into()
             .map_err(|_| StoreError::InvalidRecoveryCodeHashLength(hash_length))?;
-        let timing = EmergencyTimingState::restore(
+        let timing = EmergencyTimingState::restore_nanos(
             decode_boot_id(&timing_row.0)?,
             decode_u64(timing_row.1)?,
             decode_u64(timing_row.2)?,
