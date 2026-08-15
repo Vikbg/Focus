@@ -9,7 +9,7 @@ use focus_core::{
     SessionState,
 };
 use focus_platform::{GuardKind, PlatformBackend, PlatformFuture, PlatformResult};
-use focus_storage::{SqliteStore, StoredActiveSession};
+use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
 use focusd::DaemonService;
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
