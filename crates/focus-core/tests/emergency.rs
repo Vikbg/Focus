@@ -1,5 +1,5 @@
 use focus_core::{
-    EmergencyDecision, EmergencyError, EmergencyRequest, RecoveryCodeHash, EMERGENCY_DELAY_SECONDS,
+    EMERGENCY_DELAY_SECONDS, EmergencyDecision, EmergencyError, EmergencyRequest, RecoveryCodeHash,
 };
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
