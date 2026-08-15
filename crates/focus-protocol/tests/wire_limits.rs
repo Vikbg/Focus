@@ -1,4 +1,4 @@
-use focus_protocol::{MAX_FRAME_BYTES, RequestEnvelope, WireError};
+use focus_protocol::{MAX_FRAME_BYTES, RequestEnvelope, ResponseEnvelope, WireError};
 
 #[test]
 fn oversized_complete_frame_is_rejected_before_parsing_fields() {
@@ -6,6 +6,10 @@ fn oversized_complete_frame_is_rejected_before_parsing_fields() {
 
     assert_eq!(
         RequestEnvelope::decode(&oversized),
+        Err(WireError::FrameTooLarge)
+    );
+    assert_eq!(
+        ResponseEnvelope::decode(&oversized),
         Err(WireError::FrameTooLarge)
     );
 }
@@ -35,7 +39,7 @@ fn malformed_typed_payloads_are_rejected() {
 }
 
 #[test]
-fn arbitrary_utf8_input_never_panics_decoder() {
+fn arbitrary_utf8_input_never_panics_decoders() {
     let mut state = 0x9e37_79b9_u32;
     for length in 0..512_usize {
         let mut bytes = Vec::with_capacity(length);
@@ -44,7 +48,12 @@ fn arbitrary_utf8_input_never_panics_decoder() {
             bytes.push((state >> 24) as u8);
         }
         let input = String::from_utf8_lossy(&bytes);
-        let result = std::panic::catch_unwind(|| RequestEnvelope::decode(&input));
-        assert!(result.is_ok(), "decoder panicked for {input:?}");
+        let request_result = std::panic::catch_unwind(|| RequestEnvelope::decode(&input));
+        let response_result = std::panic::catch_unwind(|| ResponseEnvelope::decode(&input));
+        assert!(request_result.is_ok(), "request decoder panicked for {input:?}");
+        assert!(
+            response_result.is_ok(),
+            "response decoder panicked for {input:?}"
+        );
     }
 }
