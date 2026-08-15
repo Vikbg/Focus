@@ -59,7 +59,7 @@ fn network_guard_failure_prevents_locked_state() {
 
     let active = store.active_session().unwrap().unwrap();
     assert_eq!(active.id(), session.id());
-    assert_eq!(active.state(), SessionState::Arming);
+    assert_eq!(active.state(), SessionState::ProtectionFailure);
     assert_ne!(active.state(), SessionState::Locked);
     assert_eq!(active.policy_sha256(), session.policy_sha256());
     assert_eq!(active.policy_snapshot().profile_version(), PolicyVersion(3));
