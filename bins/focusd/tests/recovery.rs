@@ -94,6 +94,26 @@ fn restart_from_locked_reenters_recovery_before_reporting_locked() {
 }
 
 #[test]
+fn restart_from_emergency_pending_rearms_before_restoring_pending_state() {
+    let mut store = SqliteStore::open_in_memory().unwrap();
+    let mut backend = RecordingBackend::default();
+    let session_id = SessionId(87);
+    store
+        .set_active_session(session_id, SessionState::EmergencyPending)
+        .unwrap();
+
+    let state = block_on_ready(recover_session(&mut store, &mut backend)).unwrap();
+
+    assert_eq!(state, SessionState::EmergencyPending);
+    assert_complete_recovery(&backend);
+    assert_eq!(
+        store.active_session().unwrap().unwrap().state(),
+        SessionState::EmergencyPending
+    );
+    assert_eq!(store.transition_count().unwrap(), 2);
+}
+
+#[test]
 fn restart_from_arming_enters_protection_failure_when_guard_reapply_fails() {
     let mut store = SqliteStore::open_in_memory().unwrap();
     let mut backend = FakeBackend::default();
