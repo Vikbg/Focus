@@ -59,14 +59,10 @@ fn wrong_code_never_changes_pending_session_state() {
     let session = stored_session(71, SessionState::Locked);
     store.set_active_session(&session).unwrap();
     let mut request = begin_linux_emergency_request(&mut store, "Need to leave now").unwrap();
+    let clock = completed_clock(&request);
 
-    let evaluation = evaluate_emergency_unlock(
-        &mut store,
-        &mut request,
-        completed_clock(&request),
-        WRONG_CODE,
-    )
-    .unwrap();
+    let evaluation =
+        evaluate_emergency_unlock(&mut store, &mut request, clock, WRONG_CODE).unwrap();
 
     assert_eq!(evaluation.decision(), EmergencyDecision::InvalidCode);
     assert_eq!(
@@ -81,14 +77,9 @@ fn authorized_code_advances_pending_to_authorized_then_ending() {
     let session = stored_session(72, SessionState::Locked);
     store.set_active_session(&session).unwrap();
     let mut request = begin_linux_emergency_request(&mut store, "Need to leave now").unwrap();
+    let clock = completed_clock(&request);
 
-    let evaluation = evaluate_emergency_unlock(
-        &mut store,
-        &mut request,
-        completed_clock(&request),
-        CODE,
-    )
-    .unwrap();
+    let evaluation = evaluate_emergency_unlock(&mut store, &mut request, clock, CODE).unwrap();
 
     assert_eq!(evaluation.decision(), EmergencyDecision::Authorized);
     assert_eq!(
