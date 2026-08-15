@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{Read, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
     thread,
@@ -33,9 +33,9 @@ fn status_request_reports_running_idle_daemon() {
     stream.shutdown(std::net::Shutdown::Write).unwrap();
 
     let mut output = String::new();
-    BufReader::new(stream).read_line(&mut output).unwrap();
+    stream.read_to_string(&mut output).unwrap();
     server.join().unwrap();
     let _ = fs::remove_file(&socket_path);
 
-    assert_eq!(output, "Focus daemon: running | State: Idle\n");
+    assert_eq!(output, "Focus daemon: running\nState: Idle\n");
 }
