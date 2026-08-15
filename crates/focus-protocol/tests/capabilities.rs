@@ -37,11 +37,7 @@ fn envelope_uses_current_protocol_version() {
 
 #[test]
 fn request_envelope_round_trips_over_wire() {
-    let request = RequestEnvelope::new(
-        RequestId(5),
-        ClientKind::Cli,
-        Request::VpnUp { id: 42 },
-    );
+    let request = RequestEnvelope::new(RequestId(5), ClientKind::Cli, Request::VpnUp { id: 42 });
 
     let decoded = RequestEnvelope::decode(&request.encode()).unwrap();
 
