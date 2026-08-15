@@ -1,0 +1,81 @@
+name: Apply P1 review patch
+
+on:
+  push:
+    branches:
+      - "agent/audit-remediation-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Apply exact review patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("bins/focusd/src/lib.rs")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''    if store.active_session()?.is_some() {
+              return Err(ArmError::ActiveSessionExists);
+          }
+
+          backend.preflight().await?;
+          store.set_active_session(session)?;
+          let mut coordinator = ArmingCoordinator::new(backend);
+          '''
+          new = '''    if store.active_session()?.is_some() {
+              return Err(ArmError::ActiveSessionExists);
+          }
+
+          let transition = SessionMachine::apply(
+              session.state(),
+              SessionEvent::ArmSucceeded,
+              &transition_context(session),
+          )?;
+
+          backend.preflight().await?;
+          store.set_active_session(session)?;
+          let mut coordinator = ArmingCoordinator::new(backend);
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("unexpected arm_session prelude")
+          text = text.replace(old, new, 1)
+
+          late = '''    let transition = SessionMachine::apply(
+              session.state(),
+              SessionEvent::ArmSucceeded,
+              &transition_context(session),
+          )?;
+          store.persist_transition(session.id(), &transition)?;
+          '''
+          replacement = '''    store.persist_transition(session.id(), &transition)?;
+          '''
+          if text.count(late) != 1:
+              raise SystemExit("unexpected late arming transition")
+          text = text.replace(late, replacement, 1)
+
+          bind = "fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {"
+          public_bind = "pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {"
+          if text.count(bind) != 1:
+              raise SystemExit("unexpected production bind declaration")
+          text = text.replace(bind, public_bind, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+          rm .github/workflows/apply-p1-review-patch.yml
+
+      - name: Commit exact review patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bins/focusd/src/lib.rs .github/workflows/apply-p1-review-patch.yml
+          git commit -m "fix: validate arming before effects"
+          git push
