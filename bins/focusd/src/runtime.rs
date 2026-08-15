@@ -253,3 +253,123 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream as StdUnixStream;
+
+    use focus_core::{
+        Decision, PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId,
+        SessionState,
+    };
+    use focus_platform::FakeBackend;
+    use focus_protocol::{EmergencyRequestPayload, ProtocolState};
+    use focus_storage::{SqliteStore, StoredActiveSession};
+
+    const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
+
+    fn locked_session() -> StoredActiveSession {
+        StoredActiveSession::new(
+            SessionId(0x701),
+            SessionState::Locked,
+            Profile::new(
+                ProfileId(7),
+                PolicyVersion(3),
+                PolicySet::new(Decision::Allow),
+            )
+            .snapshot(),
+            1_000,
+            2_000,
+            RecoveryCodeHash::from_code(CODE),
+        )
+    }
+
+    fn stream_pair() -> (UnixStream, UnixStream) {
+        let (server, client) = StdUnixStream::pair().unwrap();
+        server.set_nonblocking(true).unwrap();
+        client.set_nonblocking(true).unwrap();
+        (
+            UnixStream::from_std(server).unwrap(),
+            UnixStream::from_std(client).unwrap(),
+        )
+    }
+
+    async fn exchange(mut client: UnixStream, envelope: RequestEnvelope) -> Response {
+        client.write_all(envelope.encode().as_bytes()).await.unwrap();
+        client.write_all(b"\n").await.unwrap();
+        client.flush().await.unwrap();
+
+        let mut frame = Vec::new();
+        let mut byte = [0_u8; 1];
+        loop {
+            let count = client.read(&mut byte).await.unwrap();
+            assert_ne!(count, 0, "server closed before returning a response");
+            if byte[0] == b'\n' {
+                break;
+            }
+            frame.push(byte[0]);
+        }
+        let line = std::str::from_utf8(&frame).unwrap();
+        ResponseEnvelope::decode(line).unwrap().response()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn second_connection_observes_state_mutation() {
+        let mut store = SqliteStore::open_in_memory().unwrap();
+        store.set_active_session(&locked_session()).unwrap();
+        let mut daemon = DaemonService::new(store, FakeBackend::default());
+        assert_eq!(daemon.recover().await.unwrap(), SessionState::Locked);
+
+        let snapshot = daemon.snapshot_handle();
+        let service = Arc::new(Mutex::new(daemon));
+        let policy = PeerPolicy::new(
+            nix::unistd::geteuid().as_raw(),
+            std::env::current_exe().unwrap(),
+        );
+
+        let (first_server, first_client) = stream_pair();
+        let first_task = tokio::spawn(serve_connection_as(
+            first_server,
+            Arc::clone(&service),
+            Arc::clone(&snapshot),
+            policy.clone(),
+            ClientKind::Desktop,
+        ));
+        let first_response = exchange(
+            first_client,
+            RequestEnvelope::new(
+                RequestId(701),
+                ClientKind::Desktop,
+                Request::RequestEmergencyUnlock(EmergencyRequestPayload {
+                    reason: "runtime live-state regression".to_owned(),
+                }),
+            ),
+        )
+        .await;
+        first_task.await.unwrap().unwrap();
+        assert_eq!(
+            first_response,
+            Response::Session(ProtocolState::EmergencyPending)
+        );
+
+        let (second_server, second_client) = stream_pair();
+        let second_task = tokio::spawn(serve_connection_as(
+            second_server,
+            service,
+            snapshot,
+            policy,
+            ClientKind::Desktop,
+        ));
+        let second_response = exchange(
+            second_client,
+            RequestEnvelope::new(RequestId(702), ClientKind::Desktop, Request::GetStatus),
+        )
+        .await;
+        second_task.await.unwrap().unwrap();
+        assert_eq!(
+            second_response,
+            Response::Status(ProtocolState::EmergencyPending)
+        );
+    }
+}
