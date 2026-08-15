@@ -4,7 +4,6 @@ use std::{
     io::{self, BufRead, BufReader, Write},
     os::unix::net::UnixStream,
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 use focus_protocol::{
@@ -15,11 +14,15 @@ use focus_protocol::{
 /// Default daemon socket used by installed Linux systems.
 pub const DEFAULT_SOCKET_PATH: &str = "/run/focus/focusd.sock";
 
-static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+fn request_id_from_entropy(entropy: [u8; 16]) -> RequestId {
+    RequestId(u128::from_ne_bytes(entropy))
+}
 
-fn next_request_id() -> RequestId {
-    let counter = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-    RequestId((u128::from(std::process::id()) << 64) | u128::from(counter))
+fn next_request_id() -> io::Result<RequestId> {
+    let mut entropy = [0_u8; 16];
+    getrandom::fill(&mut entropy)
+        .map_err(|error| io::Error::other(format!("failed to generate request id: {error}")))?;
+    Ok(request_id_from_entropy(entropy))
 }
 
 fn parse_command(command: &str) -> io::Result<Request> {
@@ -99,11 +102,11 @@ const fn response_error_name(error: ResponseError) -> &'static str {
 ///
 /// # Errors
 ///
-/// Returns an I/O error when the command is unsupported, the daemon socket cannot
-/// be reached, or the response is malformed, incompatible, or mismatched.
+/// Returns an I/O error when the command is unsupported, request-id entropy is unavailable,
+/// the daemon socket cannot be reached, or the response is malformed, incompatible, or mismatched.
 pub fn request_at(socket_path: &Path, command: &str) -> io::Result<String> {
     let request = parse_command(command)?;
-    let request_id = next_request_id();
+    let request_id = next_request_id()?;
     let envelope = RequestEnvelope::new(request_id, ClientKind::Cli, request);
 
     let mut stream = UnixStream::connect(socket_path)?;
