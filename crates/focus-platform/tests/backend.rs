@@ -1,4 +1,8 @@
-use std::{future::Future, pin::pin, task::{Context, Poll, Waker}};
+use std::{
+    future::Future,
+    pin::pin,
+    task::{Context, Poll, Waker},
+};
 
 use focus_platform::{FakeBackend, GuardKind, PlatformBackend, PlatformError};
 
