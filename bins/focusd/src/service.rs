@@ -94,7 +94,7 @@ where
     ///
     /// State-changing payloads that are not yet representable by the P1 protocol
     /// remain unsupported until their typed request data is introduced.
-    pub async fn handle(&mut self, request: Request) -> Response {
+    pub fn handle(&mut self, request: Request) -> Response {
         response_for(request, self.state)
     }
 
