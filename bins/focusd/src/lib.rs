@@ -235,17 +235,79 @@ pub fn serve_once(socket_path: &Path, state: DaemonState) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_line(line: &str, state: DaemonState) -> String {
-    if line != "status" {
-        return "Error: unsupported request\n".to_owned();
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParsedCliRequest {
+    Plain(Request),
+    Vpn { request: Request, id: u128 },
+}
 
-    let envelope = RequestEnvelope::new(RequestId(0), ClientKind::Cli, Request::GetStatus);
+fn parse_cli_request(line: &str) -> Result<ParsedCliRequest, &'static str> {
+    match line {
+        "status" => Ok(ParsedCliRequest::Plain(Request::GetStatus)),
+        "session" => Ok(ParsedCliRequest::Plain(Request::GetSession)),
+        "doctor" => Ok(ParsedCliRequest::Plain(Request::Doctor)),
+        "vpn list" => Ok(ParsedCliRequest::Plain(Request::GetVpnList)),
+        _ => {
+            let mut parts = line.split_whitespace();
+            let Some(vpn) = parts.next() else {
+                return Err("unsupported");
+            };
+            let Some(action) = parts.next() else {
+                return Err("unsupported");
+            };
+            let Some(id) = parts.next() else {
+                return Err("unsupported");
+            };
+
+            if parts.next().is_some() || vpn != "vpn" {
+                return Err("unsupported");
+            }
+
+            let request = match action {
+                "up" => Request::VpnUp,
+                "down" => Request::VpnDown,
+                _ => return Err("unsupported"),
+            };
+            let id = id.parse::<u128>().map_err(|_| "invalid-vpn-id")?;
+            Ok(ParsedCliRequest::Vpn { request, id })
+        }
+    }
+}
+
+fn handle_line(line: &str, state: DaemonState) -> String {
+    let parsed = match parse_cli_request(line) {
+        Ok(parsed) => parsed,
+        Err("invalid-vpn-id") => return "Error: invalid VPN id\n".to_owned(),
+        Err(_) => return "Error: unsupported request\n".to_owned(),
+    };
+
+    let request = match parsed {
+        ParsedCliRequest::Plain(request) | ParsedCliRequest::Vpn { request, .. } => request,
+    };
+    let envelope = RequestEnvelope::new(RequestId(0), ClientKind::Cli, request);
     if !envelope.is_authorized() {
         return "Error: unauthorized\n".to_owned();
     }
 
-    format!("Focus daemon: running\nState: {}\n", state_name(state))
+    match parsed {
+        ParsedCliRequest::Plain(Request::GetStatus) => {
+            format!("Focus daemon: running\nState: {}\n", state_name(state))
+        }
+        ParsedCliRequest::Plain(Request::GetSession) => {
+            format!("Session state: {}\n", state_name(state))
+        }
+        ParsedCliRequest::Plain(Request::Doctor) => "Doctor: daemon reachable\n".to_owned(),
+        ParsedCliRequest::Plain(Request::GetVpnList) => "VPNs: none configured\n".to_owned(),
+        ParsedCliRequest::Vpn {
+            request: Request::VpnUp,
+            id,
+        } => format!("VPN up requested: {id}\n"),
+        ParsedCliRequest::Vpn {
+            request: Request::VpnDown,
+            id,
+        } => format!("VPN down requested: {id}\n"),
+        _ => "Error: unsupported request\n".to_owned(),
+    }
 }
 
 const fn state_name(state: DaemonState) -> &'static str {
