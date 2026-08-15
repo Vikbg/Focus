@@ -17,6 +17,7 @@ pub enum StoreError {
     InvalidTimestamp(i64),
     InvalidRecoveryCodeHashLength(usize),
     InvalidEmergencyRequest,
+    SchemaMismatch(String),
 }
 
 impl fmt::Display for StoreError {
@@ -39,6 +40,7 @@ impl fmt::Display for StoreError {
             Self::InvalidEmergencyRequest => {
                 formatter.write_str("invalid persisted emergency request")
             }
+            Self::SchemaMismatch(table) => write!(formatter, "unexpected SQLite schema: {table}"),
         }
     }
 }
@@ -54,7 +56,8 @@ impl Error for StoreError {
             | Self::TimestampOutOfRange(_)
             | Self::InvalidTimestamp(_)
             | Self::InvalidRecoveryCodeHashLength(_)
-            | Self::InvalidEmergencyRequest => None,
+            | Self::InvalidEmergencyRequest
+            | Self::SchemaMismatch(_) => None,
         }
     }
 }
@@ -275,7 +278,36 @@ impl SqliteStore {
             );
             ",
         )?;
+
+        self.validate_table_columns("active_session", &["singleton", "session_id", "state"])?;
+        self.validate_table_columns(
+            "session_transitions",
+            &["id", "session_id", "from_state", "to_state"],
+        )?;
+        self.validate_table_columns("profiles", &["id", "version", "payload"])?;
+        self.validate_table_columns("schedules", &["id", "payload"])?;
+        self.validate_table_columns("vpn_identities", &["id", "payload"])?;
+        self.validate_table_columns("security_events", &["id", "event_type", "payload"])?;
+        self.validate_table_columns(
+            "emergency_request",
+            &["singleton", "reason", "requested_at", "code_hash"],
+        )?;
+        self.validate_table_columns("schema_migrations", &["version"])?;
         Ok(())
+    }
+
+    fn validate_table_columns(&self, table: &str, expected: &[&str]) -> StoreResult<()> {
+        let query = format!("PRAGMA table_info({table})");
+        let mut statement = self.connection.prepare(&query)?;
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if columns.iter().map(String::as_str).eq(expected.iter().copied()) {
+            return Ok(());
+        }
+
+        Err(StoreError::SchemaMismatch(table.to_owned()))
     }
 }
 
