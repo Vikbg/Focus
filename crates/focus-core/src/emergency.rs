@@ -298,12 +298,7 @@ impl EmergencyRequest {
         clock: EmergencyClockSample,
         recovery_code: &str,
     ) -> EmergencyEvaluation {
-        let clock_event = if clock.boot_id != self.timing.boot_id {
-            self.timing.boot_id = clock.boot_id;
-            self.timing.monotonic_anchor_seconds = clock.monotonic_seconds;
-            self.timing.unix_anchor_seconds = clock.unix_seconds;
-            EmergencyClockEvent::RebootDetected
-        } else {
+        let clock_event = if clock.boot_id == self.timing.boot_id {
             if clock.monotonic_seconds < self.timing.monotonic_anchor_seconds {
                 return EmergencyEvaluation::new(
                     EmergencyDecision::ClockIntegrityFailure,
@@ -334,6 +329,11 @@ impl EmergencyRequest {
             } else {
                 EmergencyClockEvent::None
             }
+        } else {
+            self.timing.boot_id = clock.boot_id;
+            self.timing.monotonic_anchor_seconds = clock.monotonic_seconds;
+            self.timing.unix_anchor_seconds = clock.unix_seconds;
+            EmergencyClockEvent::RebootDetected
         };
 
         let remaining_seconds =
