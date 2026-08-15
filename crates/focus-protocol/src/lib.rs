@@ -103,6 +103,13 @@ impl Request {
         }
     }
 
+    /// Returns stable bytes used to detect request-id reuse with a different payload.
+    #[must_use]
+    pub fn replay_fingerprint(&self) -> Vec<u8> {
+        let (request, argument) = self.wire_parts();
+        format!("{request}|{argument}").into_bytes()
+    }
+
     const fn allowed_for(&self, client: ClientKind) -> bool {
         match client {
             ClientKind::Desktop => true,
@@ -311,6 +318,8 @@ pub enum ResponseError {
     InvalidRequest,
     UnsupportedProtocolVersion,
     PeerAuthenticationFailed,
+    RequestInProgress,
+    InternalFailure,
 }
 
 impl ResponseError {
@@ -321,6 +330,8 @@ impl ResponseError {
             Self::InvalidRequest => "invalid-request",
             Self::UnsupportedProtocolVersion => "unsupported-protocol-version",
             Self::PeerAuthenticationFailed => "peer-authentication-failed",
+            Self::RequestInProgress => "request-in-progress",
+            Self::InternalFailure => "internal-failure",
         }
     }
 
@@ -331,6 +342,8 @@ impl ResponseError {
             "invalid-request" => Ok(Self::InvalidRequest),
             "unsupported-protocol-version" => Ok(Self::UnsupportedProtocolVersion),
             "peer-authentication-failed" => Ok(Self::PeerAuthenticationFailed),
+            "request-in-progress" => Ok(Self::RequestInProgress),
+            "internal-failure" => Ok(Self::InternalFailure),
             _ => Err(WireError::InvalidArgument),
         }
     }
