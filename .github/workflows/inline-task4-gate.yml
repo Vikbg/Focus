@@ -1,0 +1,36 @@
+name: Inline Task 4 Gate
+
+on:
+  push:
+    branches:
+      - agent/audit-remediation-inline
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/audit-remediation-inline
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify Task 4
+        run: |
+          cargo test --workspace
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          python3 scripts/check-no-em-dash.py
+      - name: Attest Task 4
+        run: |
+          mkdir -p .inline-verification
+          printf '%s\n' "task4-green" > .inline-verification/task4-green.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .inline-verification/task4-green.txt
+          git commit -m "test: attest task4 verification"
+          git push origin HEAD:agent/audit-remediation-inline
