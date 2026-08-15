@@ -119,10 +119,31 @@ fn snapshot_state(snapshot: &Arc<RwLock<DaemonSnapshot>>) -> crate::DaemonState 
 }
 
 async fn serve_connection<S, B>(
+    stream: UnixStream,
+    service: Arc<Mutex<DaemonService<S, B>>>,
+    snapshot: Arc<RwLock<DaemonSnapshot>>,
+    policy: PeerPolicy,
+) -> io::Result<()>
+where
+    S: FocusStore + Send + 'static,
+    B: PlatformBackend + Send + 'static,
+{
+    serve_connection_as(
+        stream,
+        service,
+        snapshot,
+        policy,
+        ClientKind::Cli,
+    )
+    .await
+}
+
+async fn serve_connection_as<S, B>(
     mut stream: UnixStream,
     service: Arc<Mutex<DaemonService<S, B>>>,
     snapshot: Arc<RwLock<DaemonSnapshot>>,
     policy: PeerPolicy,
+    authenticated_client: ClientKind,
 ) -> io::Result<()>
 where
     S: FocusStore + Send + 'static,
@@ -152,7 +173,7 @@ where
         )
         .await;
     }
-    if !envelope.is_authorized_as(ClientKind::Cli) {
+    if !envelope.is_authorized_as(authenticated_client) {
         return write_response(
             &mut stream,
             envelope.request_id(),
