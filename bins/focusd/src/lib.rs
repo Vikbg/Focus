@@ -457,6 +457,12 @@ where
         return Err(ArmError::ActiveSessionExists);
     }
 
+    let transition = SessionMachine::apply(
+        session.state(),
+        SessionEvent::ArmSucceeded,
+        &transition_context(session),
+    )?;
+
     backend.preflight().await?;
     store.set_active_session(session)?;
     let mut coordinator = ArmingCoordinator::new(backend);
@@ -476,11 +482,6 @@ where
         }
     }
 
-    let transition = SessionMachine::apply(
-        session.state(),
-        SessionEvent::ArmSucceeded,
-        &transition_context(session),
-    )?;
     store.persist_transition(session.id(), &transition)?;
     Ok(SessionState::Locked)
 }
@@ -697,7 +698,7 @@ fn bind_test_socket(socket_path: &Path) -> io::Result<UnixListener> {
     UnixListener::bind(socket_path)
 }
 
-fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
+pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
     if socket_path.exists() {
         fs::remove_file(socket_path)?;
     }
