@@ -90,6 +90,8 @@ const fn response_error_name(error: ResponseError) -> &'static str {
         ResponseError::InvalidRequest => "invalid request",
         ResponseError::UnsupportedProtocolVersion => "unsupported protocol version",
         ResponseError::PeerAuthenticationFailed => "peer authentication failed",
+        ResponseError::RequestInProgress => "request is already in progress",
+        ResponseError::InternalFailure => "internal daemon failure",
     }
 }
 
