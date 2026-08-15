@@ -69,6 +69,10 @@ impl PlatformBackend for RecordingBackend {
         self.verify += 1;
         Box::pin(async { Ok(()) })
     }
+
+    fn disarm_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 fn assert_complete_recovery(backend: &RecordingBackend) {

@@ -313,7 +313,65 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
     Ok(evaluation)
 }
 
+struct ArmingCoordinator<'a, B: PlatformBackend> {
+    backend: &'a mut B,
+    applied: Vec<GuardKind>,
+}
+
+impl<'a, B: PlatformBackend> ArmingCoordinator<'a, B> {
+    fn new(backend: &'a mut B) -> Self {
+        Self {
+            backend,
+            applied: Vec::new(),
+        }
+    }
+
+    async fn close_blocked_apps(&mut self) -> Result<(), PlatformError> {
+        self.backend.close_blocked_apps().await
+    }
+
+    async fn arm_guard(&mut self, guard: GuardKind) -> Result<(), PlatformError> {
+        self.backend.arm_guard(guard).await?;
+        self.applied.push(guard);
+        Ok(())
+    }
+
+    async fn verify_guard(&mut self, guard: GuardKind) -> Result<(), PlatformError> {
+        self.backend.verify_guard(guard).await
+    }
+
+    async fn compensate(&mut self) {
+        for guard in self.applied.iter().rev().copied() {
+            let _ = self.backend.disarm_guard(guard).await;
+        }
+    }
+}
+
+async fn fail_arming<S, B>(
+    store: &mut S,
+    coordinator: &mut ArmingCoordinator<'_, B>,
+    session: &StoredActiveSession,
+    platform_error: PlatformError,
+) -> Result<SessionState, ArmError>
+where
+    S: FocusStore,
+    B: PlatformBackend,
+{
+    coordinator.compensate().await;
+    let failure = SessionMachine::apply(
+        session.state(),
+        SessionEvent::ArmFailed,
+        &transition_context(session),
+    )?;
+    store.persist_transition(session.id(), &failure)?;
+    Err(ArmError::Platform(platform_error))
+}
+
 /// Arms one Focus session and reports Locked only after all critical guards are healthy.
+///
+/// After `Arming` is persisted, every platform failure is compensated in reverse order
+/// and the session is durably advanced to `ProtectionFailure`. Compensation is best-effort:
+/// a disarm failure never turns an uncertain protection state into a fail-open state.
 ///
 /// # Errors
 ///
@@ -334,13 +392,21 @@ where
 
     backend.preflight().await?;
     store.set_active_session(session)?;
-    backend.close_blocked_apps().await?;
+    let mut coordinator = ArmingCoordinator::new(backend);
+
+    if let Err(error) = coordinator.close_blocked_apps().await {
+        return fail_arming(store, &mut coordinator, session, error).await;
+    }
 
     for guard in REQUIRED_GUARDS {
-        backend.arm_guard(guard).await?;
+        if let Err(error) = coordinator.arm_guard(guard).await {
+            return fail_arming(store, &mut coordinator, session, error).await;
+        }
     }
     for guard in REQUIRED_GUARDS {
-        backend.verify_guard(guard).await?;
+        if let Err(error) = coordinator.verify_guard(guard).await {
+            return fail_arming(store, &mut coordinator, session, error).await;
+        }
     }
 
     let transition = SessionMachine::apply(
