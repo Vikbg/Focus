@@ -2,7 +2,9 @@
 
 use std::{error::Error, fmt, path::Path};
 
-use focus_core::{EmergencyRequest, RecoveryCodeHash, SessionId, SessionState};
+use focus_core::{
+    BootId, EmergencyRequest, EmergencyTimingState, RecoveryCodeHash, SessionId, SessionState,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 
 /// Error returned by the protected Focus store.
@@ -11,6 +13,7 @@ pub enum StoreError {
     Sqlite(rusqlite::Error),
     StateMismatch,
     InvalidSessionId(String),
+    InvalidBootId(String),
     InvalidSessionState(i64),
     InvalidCount(i64),
     TimestampOutOfRange(u64),
@@ -26,6 +29,7 @@ impl fmt::Display for StoreError {
             Self::Sqlite(error) => write!(formatter, "SQLite error: {error}"),
             Self::StateMismatch => formatter.write_str("active session state mismatch"),
             Self::InvalidSessionId(value) => write!(formatter, "invalid session id: {value}"),
+            Self::InvalidBootId(value) => write!(formatter, "invalid boot id: {value}"),
             Self::InvalidSessionState(value) => write!(formatter, "invalid session state: {value}"),
             Self::InvalidCount(value) => write!(formatter, "invalid row count: {value}"),
             Self::TimestampOutOfRange(value) => {
@@ -51,6 +55,7 @@ impl Error for StoreError {
             Self::Sqlite(error) => Some(error),
             Self::StateMismatch
             | Self::InvalidSessionId(_)
+            | Self::InvalidBootId(_)
             | Self::InvalidSessionState(_)
             | Self::InvalidCount(_)
             | Self::TimestampOutOfRange(_)
@@ -167,11 +172,11 @@ pub trait FocusStore {
     /// Returns an error when the journal write fails.
     fn append_security_event(&mut self, event: &SecurityEvent) -> StoreResult<()>;
 
-    /// Persists the currently pending emergency unlock request.
+    /// Persists the pending emergency request and its monotonic timing evidence atomically.
     ///
     /// # Errors
     ///
-    /// Returns an error when the request timestamp cannot be represented or the write fails.
+    /// Returns an error when a numeric field cannot be represented or the transaction fails.
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()>;
 
     /// Restores the pending emergency unlock request, if one exists.
@@ -273,6 +278,14 @@ impl SqliteStore {
                 code_hash BLOB NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS emergency_timing (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                boot_id TEXT NOT NULL,
+                monotonic_anchor INTEGER NOT NULL,
+                unix_anchor INTEGER NOT NULL,
+                verified_elapsed INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version INTEGER PRIMARY KEY
             );
@@ -291,6 +304,16 @@ impl SqliteStore {
         self.validate_table_columns(
             "emergency_request",
             &["singleton", "reason", "requested_at", "code_hash"],
+        )?;
+        self.validate_table_columns(
+            "emergency_timing",
+            &[
+                "singleton",
+                "boot_id",
+                "monotonic_anchor",
+                "unix_anchor",
+                "verified_elapsed",
+            ],
         )?;
         self.validate_table_columns("schema_migrations", &["version"])?;
         Ok(())
@@ -390,11 +413,15 @@ impl FocusStore for SqliteStore {
     }
 
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()> {
-        let requested_at = i64::try_from(request.requested_at())
-            .map_err(|_| StoreError::TimestampOutOfRange(request.requested_at()))?;
+        let requested_at = encode_u64(request.requested_at())?;
         let code_hash = request.code_hash().to_bytes();
+        let timing = request.timing_state();
+        let monotonic_anchor = encode_u64(timing.monotonic_anchor_seconds())?;
+        let unix_anchor = encode_u64(timing.unix_anchor_seconds())?;
+        let verified_elapsed = encode_u64(timing.verified_elapsed_seconds())?;
+        let transaction = self.connection.transaction()?;
 
-        self.connection.execute(
+        transaction.execute(
             "INSERT INTO emergency_request(singleton, reason, requested_at, code_hash)
              VALUES(1, ?1, ?2, ?3)
              ON CONFLICT(singleton) DO UPDATE SET
@@ -403,11 +430,28 @@ impl FocusStore for SqliteStore {
                 code_hash = excluded.code_hash",
             params![request.reason(), requested_at, code_hash.as_slice()],
         )?;
+        transaction.execute(
+            "INSERT INTO emergency_timing(
+                singleton, boot_id, monotonic_anchor, unix_anchor, verified_elapsed
+             ) VALUES(1, ?1, ?2, ?3, ?4)
+             ON CONFLICT(singleton) DO UPDATE SET
+                boot_id = excluded.boot_id,
+                monotonic_anchor = excluded.monotonic_anchor,
+                unix_anchor = excluded.unix_anchor,
+                verified_elapsed = excluded.verified_elapsed",
+            params![
+                encode_boot_id(timing.boot_id()),
+                monotonic_anchor,
+                unix_anchor,
+                verified_elapsed
+            ],
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
     fn emergency_request(&self) -> StoreResult<Option<EmergencyRequest>> {
-        let row = self
+        let request_row = self
             .connection
             .query_row(
                 "SELECT reason, requested_at, code_hash FROM emergency_request WHERE singleton = 1",
@@ -422,21 +466,49 @@ impl FocusStore for SqliteStore {
             )
             .optional()?;
 
-        row.map(|(reason, requested_at, code_hash)| {
-            let requested_at = u64::try_from(requested_at)
-                .map_err(|_| StoreError::InvalidTimestamp(requested_at))?;
-            let hash_length = code_hash.len();
-            let code_hash: [u8; 32] = code_hash
-                .try_into()
-                .map_err(|_| StoreError::InvalidRecoveryCodeHashLength(hash_length))?;
-            EmergencyRequest::restore(
-                reason,
-                requested_at,
-                RecoveryCodeHash::from_bytes(code_hash),
+        let Some((reason, requested_at, code_hash)) = request_row else {
+            return Ok(None);
+        };
+
+        let timing_row = self
+            .connection
+            .query_row(
+                "SELECT boot_id, monotonic_anchor, unix_anchor, verified_elapsed
+                 FROM emergency_timing WHERE singleton = 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
             )
-            .map_err(|_| StoreError::InvalidEmergencyRequest)
-        })
-        .transpose()
+            .optional()?
+            .ok_or(StoreError::InvalidEmergencyRequest)?;
+
+        let requested_at = decode_u64(requested_at)?;
+        let hash_length = code_hash.len();
+        let code_hash: [u8; 32] = code_hash
+            .try_into()
+            .map_err(|_| StoreError::InvalidRecoveryCodeHashLength(hash_length))?;
+        let timing = EmergencyTimingState::restore(
+            decode_boot_id(&timing_row.0)?,
+            decode_u64(timing_row.1)?,
+            decode_u64(timing_row.2)?,
+            decode_u64(timing_row.3)?,
+        )
+        .map_err(|_| StoreError::InvalidEmergencyRequest)?;
+
+        EmergencyRequest::restore(
+            reason,
+            requested_at,
+            RecoveryCodeHash::from_bytes(code_hash),
+            timing,
+        )
+        .map(Some)
+        .map_err(|_| StoreError::InvalidEmergencyRequest)
     }
 
     fn transition_count(&self) -> StoreResult<u64> {
@@ -454,6 +526,14 @@ fn count_rows(connection: &Connection, table: &str) -> StoreResult<u64> {
     u64::try_from(count).map_err(|_| StoreError::InvalidCount(count))
 }
 
+fn encode_u64(value: u64) -> StoreResult<i64> {
+    i64::try_from(value).map_err(|_| StoreError::TimestampOutOfRange(value))
+}
+
+fn decode_u64(value: i64) -> StoreResult<u64> {
+    u64::try_from(value).map_err(|_| StoreError::InvalidTimestamp(value))
+}
+
 fn encode_session_id(session_id: SessionId) -> String {
     format!("{:032x}", session_id.0)
 }
@@ -462,6 +542,16 @@ fn decode_session_id(value: &str) -> StoreResult<SessionId> {
     u128::from_str_radix(value, 16)
         .map(SessionId)
         .map_err(|_| StoreError::InvalidSessionId(value.to_owned()))
+}
+
+fn encode_boot_id(boot_id: BootId) -> String {
+    format!("{:032x}", boot_id.0)
+}
+
+fn decode_boot_id(value: &str) -> StoreResult<BootId> {
+    u128::from_str_radix(value, 16)
+        .map(BootId)
+        .map_err(|_| StoreError::InvalidBootId(value.to_owned()))
 }
 
 const fn encode_state(state: SessionState) -> i64 {
