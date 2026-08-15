@@ -29,7 +29,7 @@ if cargo check -p focus-core --locked >"$output" 2>&1; then
   exit 1
 fi
 
-if ! grep -Eq "lock file .* needs to be updated|Cargo.lock needs to be updated|needs to be updated but --locked was passed" "$output"; then
+if ! grep -Eq "lock file .* needs to be updated|Cargo.lock needs to be updated|needs to be updated but --locked was passed|cannot update the lock file .* because --locked was passed" "$output"; then
   cat "$output"
   echo "ERROR: locked build failed for an unexpected reason"
   exit 1
