@@ -61,6 +61,35 @@ impl From<PlatformError> for ArmError {
     }
 }
 
+/// Error returned while recovering protected session state after daemon restart.
+#[derive(Debug)]
+pub enum RecoveryError {
+    /// The protected store could not be queried or updated.
+    Store(StoreError),
+}
+
+impl fmt::Display for RecoveryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Store(error) => write!(formatter, "session recovery store error: {error}"),
+        }
+    }
+}
+
+impl Error for RecoveryError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error),
+        }
+    }
+}
+
+impl From<StoreError> for RecoveryError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
 /// Arms one Focus session and reports Locked only after all critical guards are healthy.
 ///
 /// The supplied policy is already a versioned immutable snapshot. It is cloned at the
@@ -105,6 +134,80 @@ where
     ))?;
 
     Ok(SessionState::Locked)
+}
+
+/// Recovers a persisted session after daemon restart.
+///
+/// Arming is first persisted as Recovering. Critical guards are then reapplied and
+/// verified. Healthy enforcement advances to Locked. Any platform failure advances
+/// to ProtectionFailure so the failure survives another restart.
+///
+/// Existing stable states are returned unchanged, and a missing active session is
+/// treated as Idle.
+///
+/// # Errors
+///
+/// Returns [`RecoveryError::Store`] if protected state cannot be queried or a
+/// recovery transition cannot be persisted.
+pub async fn recover_session<S, B>(
+    store: &mut S,
+    backend: &mut B,
+) -> Result<SessionState, RecoveryError>
+where
+    S: FocusStore,
+    B: PlatformBackend,
+{
+    let Some(active) = store.active_session()? else {
+        return Ok(SessionState::Idle);
+    };
+
+    let session_id = active.id();
+    let mut state = active.state();
+
+    if state == SessionState::Arming {
+        store.persist_transition(&Transition::new(
+            session_id,
+            SessionState::Arming,
+            SessionState::Recovering,
+        ))?;
+        state = SessionState::Recovering;
+    }
+
+    if state != SessionState::Recovering {
+        return Ok(state);
+    }
+
+    if reapply_and_verify_guards(backend).await {
+        store.persist_transition(&Transition::new(
+            session_id,
+            SessionState::Recovering,
+            SessionState::Locked,
+        ))?;
+        Ok(SessionState::Locked)
+    } else {
+        store.persist_transition(&Transition::new(
+            session_id,
+            SessionState::Recovering,
+            SessionState::ProtectionFailure,
+        ))?;
+        Ok(SessionState::ProtectionFailure)
+    }
+}
+
+async fn reapply_and_verify_guards<B: PlatformBackend>(backend: &mut B) -> bool {
+    for guard in REQUIRED_GUARDS {
+        if backend.arm_guard(guard).await.is_err() {
+            return false;
+        }
+    }
+
+    for guard in REQUIRED_GUARDS {
+        if backend.verify_guard(guard).await.is_err() {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Serves one local IPC request on a Unix socket and then exits.
