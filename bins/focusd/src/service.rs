@@ -103,9 +103,8 @@ where
         }
 
         let fingerprint = request.replay_fingerprint();
-        let reservation = match self.store.reserve_mutation(request_id.0, &fingerprint) {
-            Ok(reservation) => reservation,
-            Err(_) => return Response::Error(ResponseError::InternalFailure),
+        let Ok(reservation) = self.store.reserve_mutation(request_id.0, &fingerprint) else {
+            return Response::Error(ResponseError::InternalFailure);
         };
 
         match reservation {
@@ -157,7 +156,7 @@ where
                         self.publish_state(SessionState::EmergencyPending);
                         Response::Session(protocol_state(SessionState::EmergencyPending))
                     }
-                    Err(error) => map_emergency_error(error),
+                    Err(error) => map_emergency_error(&error),
                 }
             }
             Request::SubmitEmergencyCode(payload) => self.submit_emergency_code(&payload.code),
@@ -175,7 +174,7 @@ where
         let evaluation = match evaluate_linux_emergency_unlock(&mut self.store, &mut request, code)
         {
             Ok(evaluation) => evaluation,
-            Err(error) => return map_emergency_error(error),
+            Err(error) => return map_emergency_error(&error),
         };
 
         if evaluation.decision() == EmergencyDecision::InvalidCode {
@@ -217,7 +216,7 @@ fn replay_response(request_id: RequestId, encoded: &[u8]) -> Response {
     envelope.response()
 }
 
-fn map_emergency_error(error: LinuxEmergencyError) -> Response {
+fn map_emergency_error(error: &LinuxEmergencyError) -> Response {
     match error {
         LinuxEmergencyError::Domain(_)
         | LinuxEmergencyError::NoActiveSession
