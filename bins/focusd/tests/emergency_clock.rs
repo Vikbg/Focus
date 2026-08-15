@@ -17,12 +17,8 @@ const fn sample(monotonic_seconds: u64, unix_seconds: u64) -> EmergencyClockSamp
 #[test]
 fn production_emergency_path_samples_linux_clock_internally() {
     let mut store = SqliteStore::open_in_memory().unwrap();
-    let mut request = begin_linux_emergency_request(
-        &mut store,
-        "Need a real emergency exit",
-        CODE,
-    )
-    .unwrap();
+    let mut request =
+        begin_linux_emergency_request(&mut store, "Need a real emergency exit", CODE).unwrap();
 
     let evaluation = evaluate_linux_emergency_unlock(&mut store, &mut request, CODE).unwrap();
 
