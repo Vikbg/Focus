@@ -11,13 +11,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use focus_core::{SessionId, SessionPolicySnapshot, SessionState};
+use focus_core::{
+    EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyEvaluation,
+    EmergencyRequest, SessionId, SessionPolicySnapshot, SessionState,
+};
 use focus_platform::{GuardKind, PlatformBackend, PlatformError};
 use focus_protocol::{
     ClientKind, ProtocolState, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope,
     ResponseError,
 };
-use focus_storage::{FocusStore, StoreError, Transition};
+use focus_storage::{FocusStore, SecurityEvent, StoreError, Transition};
 use nix::{
     sys::socket::{getsockopt, sockopt::PeerCredentials},
     unistd::{Uid, chown},
@@ -145,6 +148,56 @@ impl PeerPolicy {
 
         peer_executable == expected_executable
     }
+}
+
+/// Evaluates an emergency unlock observation, persists timing evidence, and handles anomalies.
+///
+/// Wall-clock and reboot events are journaled. A monotonic regression is treated as a
+/// clock-integrity failure and moves any active protected session to `ProtectionFailure`.
+///
+/// # Errors
+///
+/// Returns a storage error if updated timing evidence, the protection transition, or a
+/// security event cannot be persisted.
+pub fn evaluate_emergency_unlock<S: FocusStore>(
+    store: &mut S,
+    request: &mut EmergencyRequest,
+    clock: EmergencyClockSample,
+    recovery_code: &str,
+) -> Result<EmergencyEvaluation, StoreError> {
+    let evaluation = request.evaluate(clock, recovery_code);
+    store.persist_emergency_request(request)?;
+
+    if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure {
+        if let Some(active) = store.active_session()? {
+            if active.state() != SessionState::ProtectionFailure {
+                store.persist_transition(&Transition::new(
+                    active.id(),
+                    active.state(),
+                    SessionState::ProtectionFailure,
+                ))?;
+            }
+        }
+    }
+
+    if evaluation.clock_event() != EmergencyClockEvent::None {
+        let event_type = match evaluation.clock_event() {
+            EmergencyClockEvent::None => unreachable!(),
+            EmergencyClockEvent::WallClockAnomaly => "emergency_clock_wall_anomaly",
+            EmergencyClockEvent::RebootDetected => "emergency_clock_reboot",
+            EmergencyClockEvent::MonotonicRegression => "emergency_clock_monotonic_regression",
+        };
+        let payload = format!(
+            "boot_id={:032x};monotonic={};unix={}",
+            clock.boot_id().0,
+            clock.monotonic_seconds(),
+            clock.unix_seconds()
+        )
+        .into_bytes();
+        store.append_security_event(&SecurityEvent::new(event_type, payload))?;
+    }
+
+    Ok(evaluation)
 }
 
 /// Arms one Focus session and reports Locked only after all critical guards are healthy.
