@@ -32,8 +32,7 @@ pub enum PlatformError {
 pub type PlatformResult<T> = Result<T, PlatformError>;
 
 /// Boxed asynchronous platform operation.
-pub type PlatformFuture<'a, T = ()> =
-    Pin<Box<dyn Future<Output = PlatformResult<T>> + Send + 'a>>;
+pub type PlatformFuture<'a, T = ()> = Pin<Box<dyn Future<Output = PlatformResult<T>> + Send + 'a>>;
 
 /// Operating-system enforcement contract consumed by the Focus daemon.
 pub trait PlatformBackend {
