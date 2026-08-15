@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-focus-protocol = { path = "../../crates/focus-protocol" }
+focus-protocol = { path = "../../crates/focus-protocol", version = "=0.0.0" }
 
 [lints]
 workspace = true
