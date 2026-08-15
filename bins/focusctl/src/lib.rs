@@ -149,3 +149,21 @@ pub fn request_at(socket_path: &Path, command: &str) -> io::Result<String> {
 pub fn status_at(socket_path: &Path) -> io::Result<String> {
     request_at(socket_path, "status")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_id_preserves_all_os_entropy_bits() {
+        let entropy = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+            0xdd, 0xee, 0xff,
+        ];
+
+        assert_eq!(
+            request_id_from_entropy(entropy),
+            RequestId(u128::from_ne_bytes(entropy))
+        );
+    }
+}
