@@ -6,16 +6,16 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-focus-core = { path = "../../crates/focus-core" }
-focus-linux = { path = "../../platform/linux" }
-focus-platform = { path = "../../crates/focus-platform" }
-focus-protocol = { path = "../../crates/focus-protocol" }
-focus-storage = { path = "../../crates/focus-storage" }
+focus-core = { path = "../../crates/focus-core", version = "=0.0.0" }
+focus-linux = { path = "../../platform/linux", version = "=0.0.0" }
+focus-platform = { path = "../../crates/focus-platform", version = "=0.0.0" }
+focus-protocol = { path = "../../crates/focus-protocol", version = "=0.0.0" }
+focus-storage = { path = "../../crates/focus-storage", version = "=0.0.0" }
 nix = { version = "0.31.3", features = ["fs", "socket", "user"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
-focusctl = { path = "../focusctl" }
+focusctl = { path = "../focusctl", version = "=0.0.0" }
 
 [lints]
 workspace = true
