@@ -2,9 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use focus_core::{EmergencyDecision, Schedule, SessionState};
 use focus_platform::PlatformBackend;
-use focus_protocol::{
-    ReplayPolicy, Request, RequestId, Response, ResponseEnvelope, ResponseError,
-};
+use focus_protocol::{ReplayPolicy, Request, RequestId, Response, ResponseEnvelope, ResponseError};
 use focus_storage::{FocusStore, MutationReservation};
 
 use crate::{
