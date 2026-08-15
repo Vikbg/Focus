@@ -34,8 +34,9 @@ fn stored_session(id: u128, state: SessionState) -> StoredActiveSession {
 #[test]
 fn production_emergency_path_samples_linux_clock_internally() {
     let mut store = SqliteStore::open_in_memory().unwrap();
-    let mut request =
-        begin_linux_emergency_request(&mut store, "Need a real emergency exit", CODE).unwrap();
+    let session = stored_session(6, SessionState::Locked);
+    store.set_active_session(&session).unwrap();
+    let mut request = begin_linux_emergency_request(&mut store, "Need a real emergency exit").unwrap();
 
     let evaluation = evaluate_linux_emergency_unlock(&mut store, &mut request, CODE).unwrap();
 
@@ -48,8 +49,14 @@ fn production_emergency_path_samples_linux_clock_internally() {
 #[test]
 fn wall_clock_anomaly_is_journaled_and_timing_progress_is_persisted() {
     let mut store = SqliteStore::open_in_memory().unwrap();
-    let mut request =
-        EmergencyRequest::new("Need a real emergency exit", sample(100, 1_000), CODE).unwrap();
+    let session = stored_session(8, SessionState::EmergencyPending);
+    store.set_active_session(&session).unwrap();
+    let mut request = EmergencyRequest::new(
+        session.id(),
+        "Need a real emergency exit",
+        sample(100, 1_000),
+    )
+    .unwrap();
     store.persist_emergency_request(&request).unwrap();
 
     let evaluation =
@@ -82,8 +89,12 @@ fn monotonic_regression_moves_active_session_to_protection_failure() {
     let mut store = SqliteStore::open_in_memory().unwrap();
     let session = stored_session(7, SessionState::EmergencyPending);
     store.set_active_session(&session).unwrap();
-    let mut request =
-        EmergencyRequest::new("Need a real emergency exit", sample(100, 1_000), CODE).unwrap();
+    let mut request = EmergencyRequest::new(
+        session.id(),
+        "Need a real emergency exit",
+        sample(100, 1_000),
+    )
+    .unwrap();
     store.persist_emergency_request(&request).unwrap();
 
     let evaluation =
