@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-focus-core = { path = "../../crates/focus-core" }
+focus-core = { path = "../../crates/focus-core", version = "=0.0.0" }
 nix = { version = "0.31.3", features = ["time"] }
 
 [lints]
