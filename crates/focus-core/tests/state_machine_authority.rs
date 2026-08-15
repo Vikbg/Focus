@@ -1,8 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use focus_core::{
-    SessionEvent, SessionMachine, SessionState, TransitionContext, TransitionError,
-};
+use focus_core::{SessionEvent, SessionMachine, SessionState, TransitionContext, TransitionError};
 
 const BEFORE_MINIMUM: TransitionContext = TransitionContext::new(500, 1_000);
 const AFTER_MINIMUM: TransitionContext = TransitionContext::new(1_000, 1_000);
@@ -42,11 +40,7 @@ fn emergency_flow_requires_explicit_pending_and_authorized_states() {
     );
     assert_eq!(state, SessionState::EmergencyPending);
 
-    let state = apply(
-        state,
-        SessionEvent::EmergencyAuthorized,
-        &BEFORE_MINIMUM,
-    );
+    let state = apply(state, SessionEvent::EmergencyAuthorized, &BEFORE_MINIMUM);
     assert_eq!(state, SessionState::EmergencyAuthorized);
 
     let state = apply(state, SessionEvent::EndRequested, &BEFORE_MINIMUM);
@@ -62,11 +56,7 @@ fn recovery_flow_can_only_restore_locked_or_fail_closed() {
     );
     assert_eq!(recovering, SessionState::Recovering);
 
-    let locked = apply(
-        recovering,
-        SessionEvent::RecoverySucceeded,
-        &BEFORE_MINIMUM,
-    );
+    let locked = apply(recovering, SessionEvent::RecoverySucceeded, &BEFORE_MINIMUM);
     assert_eq!(locked, SessionState::Locked);
 
     let failed = apply(

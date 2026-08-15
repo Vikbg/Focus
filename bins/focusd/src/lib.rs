@@ -107,7 +107,9 @@ impl fmt::Display for RecoveryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Store(error) => write!(formatter, "session recovery store error: {error}"),
-            Self::Transition(error) => write!(formatter, "session recovery transition error: {error:?}"),
+            Self::Transition(error) => {
+                write!(formatter, "session recovery transition error: {error:?}")
+            }
         }
     }
 }
@@ -277,7 +279,9 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
     store.persist_emergency_observation(
         &candidate,
         event.as_ref(),
-        transition.as_ref().map(|(session_id, validated)| (*session_id, validated)),
+        transition
+            .as_ref()
+            .map(|(session_id, validated)| (*session_id, validated)),
     )?;
     *request = candidate;
     Ok(evaluation)
@@ -375,8 +379,7 @@ where
 
     match state {
         SessionState::Arming | SessionState::Locked => {
-            let recovering =
-                SessionMachine::apply(state, SessionEvent::RecoveryStarted, &context)?;
+            let recovering = SessionMachine::apply(state, SessionEvent::RecoveryStarted, &context)?;
             store.persist_transition(session_id, &recovering)?;
         }
         SessionState::Recovering => {}

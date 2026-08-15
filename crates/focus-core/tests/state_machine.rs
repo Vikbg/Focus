@@ -1,6 +1,4 @@
-use focus_core::{
-    SessionEvent, SessionMachine, SessionState, TransitionContext, TransitionError,
-};
+use focus_core::{SessionEvent, SessionMachine, SessionState, TransitionContext, TransitionError};
 
 #[test]
 fn locked_session_cannot_end_early_without_emergency_authorization() {

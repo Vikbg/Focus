@@ -35,9 +35,7 @@ fn storage_accepts_only_a_domain_validated_transition() {
     )
     .unwrap();
 
-    store
-        .persist_transition(session.id(), &transition)
-        .unwrap();
+    store.persist_transition(session.id(), &transition).unwrap();
 
     assert_eq!(
         store.active_session().unwrap().unwrap().state(),
