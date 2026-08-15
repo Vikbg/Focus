@@ -124,14 +124,18 @@ pub fn request_at(socket_path: &Path, command: &str) -> io::Result<String> {
             "daemon protocol version mismatch",
         ));
     }
-    if response.request_id() != request_id {
+
+    let response_payload = response.response();
+    let preauth_rejection = response.request_id() == RequestId(0)
+        && response_payload == Response::Error(ResponseError::PeerAuthenticationFailed);
+    if response.request_id() != request_id && !preauth_rejection {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "daemon response request id mismatch",
         ));
     }
 
-    Ok(render_response(response.response()))
+    Ok(render_response(response_payload))
 }
 
 /// Requests the current Focus daemon status through local IPC.
