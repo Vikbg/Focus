@@ -1,7 +1,7 @@
 use std::{
     fs,
     os::unix::net::UnixStream,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -22,7 +22,7 @@ fn current_uid() -> u32 {
     nix::unistd::geteuid().as_raw()
 }
 
-fn wait_for_socket(socket: &PathBuf) {
+fn wait_for_socket(socket: &Path) {
     for _ in 0..100 {
         if socket.exists() {
             return;
