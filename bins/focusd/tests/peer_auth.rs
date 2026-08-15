@@ -1,6 +1,8 @@
 use std::{
     fs,
+    os::unix::net::UnixStream,
     path::PathBuf,
+    sync::mpsc,
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -20,6 +22,16 @@ fn current_uid() -> u32 {
     nix::unistd::geteuid().as_raw()
 }
 
+fn wait_for_socket(socket: &PathBuf) {
+    for _ in 0..100 {
+        if socket.exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("socket did not appear");
+}
+
 #[test]
 fn authenticated_peer_with_expected_executable_can_query_status() {
     let socket = temp_socket("allowed");
@@ -30,12 +42,7 @@ fn authenticated_peer_with_expected_executable_can_query_status() {
         serve_once_with_peer_policy(&server_socket, SessionState::Idle, &policy).unwrap();
     });
 
-    for _ in 0..100 {
-        if socket.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_socket(&socket);
 
     let response = focusctl::status_at(&socket).unwrap();
     server.join().unwrap();
@@ -53,16 +60,34 @@ fn peer_with_unexpected_executable_is_rejected() {
         serve_once_with_peer_policy(&server_socket, SessionState::Idle, &policy).unwrap();
     });
 
-    for _ in 0..100 {
-        if socket.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_socket(&socket);
 
     let response = focusctl::status_at(&socket).unwrap();
     server.join().unwrap();
     let _ = fs::remove_file(socket);
 
     assert_eq!(response, "Error: peer authentication failed\n");
+}
+
+#[test]
+fn unauthenticated_peer_cannot_stall_daemon_before_sending_a_request() {
+    let socket = temp_socket("stalled-rejected");
+    let server_socket = socket.clone();
+    let policy = PeerPolicy::new(current_uid(), PathBuf::from("/definitely/not-this-test"));
+    let (done_tx, done_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let result = serve_once_with_peer_policy(&server_socket, SessionState::Idle, &policy);
+        done_tx.send(result).unwrap();
+    });
+
+    wait_for_socket(&socket);
+    let stalled_peer = UnixStream::connect(&socket).unwrap();
+
+    let completed_without_input = done_rx.recv_timeout(Duration::from_millis(250));
+
+    drop(stalled_peer);
+    server.join().unwrap();
+    let _ = fs::remove_file(socket);
+
+    assert!(matches!(completed_without_input, Ok(Ok(()))));
 }
