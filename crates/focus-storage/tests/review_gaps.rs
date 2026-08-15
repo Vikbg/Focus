@@ -15,7 +15,11 @@ const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
 const BOOT_A: BootId = BootId(0xaaaa);
 const BOOT_B: BootId = BootId(0xbbbb);
 
-const fn sample(boot_id: BootId, monotonic_seconds: u64, unix_seconds: u64) -> EmergencyClockSample {
+const fn sample(
+    boot_id: BootId,
+    monotonic_seconds: u64,
+    unix_seconds: u64,
+) -> EmergencyClockSample {
     EmergencyClockSample::new(boot_id, monotonic_seconds, unix_seconds)
 }
 
