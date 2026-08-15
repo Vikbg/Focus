@@ -7,7 +7,9 @@ rust-version.workspace = true
 
 [dependencies]
 focus-core = { path = "../../crates/focus-core" }
+focus-platform = { path = "../../crates/focus-platform" }
 focus-protocol = { path = "../../crates/focus-protocol" }
+focus-storage = { path = "../../crates/focus-storage" }
 
 [lints]
 workspace = true
