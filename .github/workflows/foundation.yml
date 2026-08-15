@@ -3,25 +3,32 @@ name: Foundation
 on:
   push:
     branches:
+      - main
       - "agent/**"
   pull_request:
     paths:
       - "Cargo.toml"
+      - "Cargo.lock"
       - "rust-toolchain.toml"
       - "crates/**"
       - "bins/**"
       - "platform/**"
       - "package.json"
+      - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "apps/**"
       - "scripts/**"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Reject forbidden punctuation
         run: python3 scripts/check-no-em-dash.py
@@ -31,17 +38,23 @@ jobs:
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
 
+      - name: Check Rust workspace
+        run: cargo check --workspace --all-targets --locked
+
       - name: Test Rust workspace
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Prove Cargo lock enforcement
+        run: bash scripts/check-lock-enforcement.sh
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
 
@@ -51,7 +64,13 @@ jobs:
           corepack prepare pnpm@11.18.0 --activate
 
       - name: Install JavaScript dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint JavaScript workspaces
+        run: pnpm -r lint
 
       - name: Typecheck JavaScript workspaces
         run: pnpm -r typecheck
+
+      - name: Test JavaScript workspaces
+        run: pnpm -r test
