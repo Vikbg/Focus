@@ -5,5 +5,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+focus-core = { path = "../focus-core" }
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+
 [lints]
 workspace = true

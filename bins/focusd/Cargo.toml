@@ -5,5 +5,16 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+focus-core = { path = "../../crates/focus-core" }
+focus-linux = { path = "../../platform/linux" }
+focus-platform = { path = "../../crates/focus-platform" }
+focus-protocol = { path = "../../crates/focus-protocol" }
+focus-storage = { path = "../../crates/focus-storage" }
+nix = { version = "0.31.3", features = ["fs", "socket", "user"] }
+
+[dev-dependencies]
+focusctl = { path = "../focusctl" }
+
 [lints]
 workspace = true
