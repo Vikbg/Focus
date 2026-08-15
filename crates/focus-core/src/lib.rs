@@ -13,7 +13,7 @@ pub use decision::{BlockReason, Decision};
 pub use emergency::EmergencyState;
 pub use policy::{DecisionContext, PolicyEngine, PolicySet};
 pub use profile::{PolicyVersion, Profile, ProfileId, SessionPolicySnapshot};
-pub use schedule::ScheduleSource;
+pub use schedule::{Schedule, ScheduleId, ScheduleSource, ScheduleStatus, SchedulerOutcome};
 pub use session::SessionId;
 pub use state_machine::{SessionGuard, SessionState, TransitionError};
 pub use vpn::VpnId;
