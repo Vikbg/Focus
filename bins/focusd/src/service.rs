@@ -99,7 +99,7 @@ where
     /// interrupted request remains `InProgress` and is never executed a second time.
     pub fn handle(&mut self, request_id: RequestId, request: Request) -> Response {
         if request.replay_policy() == ReplayPolicy::Repeatable {
-            return response_for(request, self.state);
+            return response_for(&request, self.state);
         }
 
         let fingerprint = request.replay_fingerprint();
@@ -160,7 +160,7 @@ where
                 }
             }
             Request::SubmitEmergencyCode(payload) => self.submit_emergency_code(&payload.code),
-            other => response_for(other, self.state),
+            other => response_for(&other, self.state),
         }
     }
 
