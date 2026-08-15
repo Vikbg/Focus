@@ -6,7 +6,9 @@ use std::{
     thread,
 };
 
-use focus_protocol::{ClientKind, ProtocolState, Request, RequestEnvelope, Response, ResponseEnvelope};
+use focus_protocol::{
+    ClientKind, ProtocolState, Request, RequestEnvelope, Response, ResponseEnvelope,
+};
 
 fn test_socket_path() -> PathBuf {
     std::env::temp_dir().join(format!("focusctl-status-{}.sock", std::process::id()))
@@ -28,10 +30,8 @@ fn status_reads_typed_daemon_status_without_owning_security_state() {
         let envelope = RequestEnvelope::decode(request.trim()).unwrap();
         assert_eq!(envelope.client(), ClientKind::Cli);
         assert_eq!(envelope.request(), Request::GetStatus);
-        let response = ResponseEnvelope::new(
-            envelope.request_id(),
-            Response::Status(ProtocolState::Idle),
-        );
+        let response =
+            ResponseEnvelope::new(envelope.request_id(), Response::Status(ProtocolState::Idle));
         stream.write_all(response.encode().as_bytes()).unwrap();
         stream.write_all(b"\n").unwrap();
     });
