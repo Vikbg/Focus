@@ -16,14 +16,15 @@ use std::{
 
 use focus_core::{
     EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyEvaluation,
-    EmergencyRequest, SessionState,
+    EmergencyRequest, SessionEvent, SessionMachine, SessionState, TransitionContext,
+    TransitionError,
 };
 use focus_platform::{GuardKind, PlatformBackend, PlatformError};
 use focus_protocol::{
     ClientKind, ProtocolState, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope,
     ResponseError,
 };
-use focus_storage::{FocusStore, SecurityEvent, StoreError, StoredActiveSession, Transition};
+use focus_storage::{FocusStore, SecurityEvent, StoreError, StoredActiveSession};
 use nix::{
     sys::socket::{getsockopt, sockopt::PeerCredentials},
     unistd::{Uid, chown},
@@ -49,6 +50,8 @@ pub enum ArmError {
     ActiveSessionExists,
     /// The protected store could not persist session state.
     Store(StoreError),
+    /// The requested lifecycle change was rejected by the authoritative state machine.
+    Transition(TransitionError),
     /// An operating-system enforcement operation failed.
     Platform(PlatformError),
 }
@@ -58,6 +61,7 @@ impl fmt::Display for ArmError {
         match self {
             Self::ActiveSessionExists => formatter.write_str("another Focus session is active"),
             Self::Store(error) => write!(formatter, "session store error: {error}"),
+            Self::Transition(error) => write!(formatter, "session transition error: {error:?}"),
             Self::Platform(error) => write!(formatter, "platform enforcement error: {error:?}"),
         }
     }
@@ -67,7 +71,7 @@ impl Error for ArmError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Store(error) => Some(error),
-            Self::ActiveSessionExists | Self::Platform(_) => None,
+            Self::ActiveSessionExists | Self::Transition(_) | Self::Platform(_) => None,
         }
     }
 }
@@ -75,6 +79,12 @@ impl Error for ArmError {
 impl From<StoreError> for ArmError {
     fn from(error: StoreError) -> Self {
         Self::Store(error)
+    }
+}
+
+impl From<TransitionError> for ArmError {
+    fn from(error: TransitionError) -> Self {
+        Self::Transition(error)
     }
 }
 
@@ -89,12 +99,15 @@ impl From<PlatformError> for ArmError {
 pub enum RecoveryError {
     /// The protected store could not be queried or updated.
     Store(StoreError),
+    /// The persisted lifecycle state cannot perform the required recovery transition.
+    Transition(TransitionError),
 }
 
 impl fmt::Display for RecoveryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Store(error) => write!(formatter, "session recovery store error: {error}"),
+            Self::Transition(error) => write!(formatter, "session recovery transition error: {error:?}"),
         }
     }
 }
@@ -103,6 +116,7 @@ impl Error for RecoveryError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Store(error) => Some(error),
+            Self::Transition(_) => None,
         }
     }
 }
@@ -110,6 +124,51 @@ impl Error for RecoveryError {
 impl From<StoreError> for RecoveryError {
     fn from(error: StoreError) -> Self {
         Self::Store(error)
+    }
+}
+
+impl From<TransitionError> for RecoveryError {
+    fn from(error: TransitionError) -> Self {
+        Self::Transition(error)
+    }
+}
+
+/// Error returned while evaluating and atomically persisting emergency timing evidence.
+#[derive(Debug)]
+pub enum EmergencyUnlockError {
+    /// The protected store could not be queried or updated.
+    Store(StoreError),
+    /// The required fail-closed lifecycle transition is not legal for persisted state.
+    Transition(TransitionError),
+}
+
+impl fmt::Display for EmergencyUnlockError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Store(error) => write!(formatter, "emergency store error: {error}"),
+            Self::Transition(error) => write!(formatter, "emergency transition error: {error:?}"),
+        }
+    }
+}
+
+impl Error for EmergencyUnlockError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Store(error) => Some(error),
+            Self::Transition(_) => None,
+        }
+    }
+}
+
+impl From<StoreError> for EmergencyUnlockError {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl From<TransitionError> for EmergencyUnlockError {
+    fn from(error: TransitionError) -> Self {
+        Self::Transition(error)
     }
 }
 
@@ -153,6 +212,13 @@ impl PeerPolicy {
     }
 }
 
+fn transition_context(session: &StoredActiveSession) -> TransitionContext {
+    TransitionContext::new(
+        session.started_at_unix_ms(),
+        session.minimum_end_at_unix_ms(),
+    )
+}
+
 /// Evaluates an emergency unlock observation, persists timing evidence, and handles anomalies.
 ///
 /// This low-level function accepts an explicit clock sample for deterministic tests and
@@ -162,23 +228,29 @@ impl PeerPolicy {
 ///
 /// # Errors
 ///
-/// Returns a storage error if updated timing evidence, the protection transition, or a
-/// security event cannot be persisted.
+/// Returns an error if protected state cannot be persisted or if the authoritative state
+/// machine rejects the required fail-closed transition for the persisted lifecycle state.
 pub fn evaluate_emergency_unlock<S: FocusStore>(
     store: &mut S,
     request: &mut EmergencyRequest,
     clock: EmergencyClockSample,
     recovery_code: &str,
-) -> Result<EmergencyEvaluation, StoreError> {
+) -> Result<EmergencyEvaluation, EmergencyUnlockError> {
     let mut candidate = request.clone();
     let evaluation = candidate.evaluate(clock, recovery_code);
 
     let transition = if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure {
-        store.active_session()?.and_then(|active| {
-            (active.state() != SessionState::ProtectionFailure).then(|| {
-                Transition::new(active.id(), active.state(), SessionState::ProtectionFailure)
-            })
-        })
+        match store.active_session()? {
+            Some(active) if active.state() != SessionState::ProtectionFailure => {
+                let validated = SessionMachine::apply(
+                    active.state(),
+                    SessionEvent::ProtectionFailed,
+                    &transition_context(&active),
+                )?;
+                Some((active.id(), validated))
+            }
+            _ => None,
+        }
     } else {
         None
     };
@@ -202,7 +274,11 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
         Some(SecurityEvent::new(event_type, payload))
     };
 
-    store.persist_emergency_observation(&candidate, event.as_ref(), transition.as_ref())?;
+    store.persist_emergency_observation(
+        &candidate,
+        event.as_ref(),
+        transition.as_ref().map(|(session_id, validated)| (*session_id, validated)),
+    )?;
     *request = candidate;
     Ok(evaluation)
 }
@@ -215,8 +291,9 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
 /// # Errors
 ///
 /// Returns [`ArmError::ActiveSessionExists`] when protected state already contains
-/// an active session, [`ArmError::Store`] when state cannot be persisted, or
-/// [`ArmError::Platform`] when platform preparation or enforcement fails.
+/// an active session, [`ArmError::Store`] when state cannot be persisted,
+/// [`ArmError::Transition`] when the session record does not represent a valid arming state,
+/// or [`ArmError::Platform`] when platform preparation or enforcement fails.
 pub async fn arm_session<S, B>(
     store: &mut S,
     backend: &mut B,
@@ -243,11 +320,12 @@ where
         backend.verify_guard(guard).await?;
     }
 
-    store.persist_transition(&Transition::new(
-        session.id(),
-        SessionState::Arming,
-        SessionState::Locked,
-    ))?;
+    let transition = SessionMachine::apply(
+        session.state(),
+        SessionEvent::ArmSucceeded,
+        &transition_context(session),
+    )?;
+    store.persist_transition(session.id(), &transition)?;
 
     Ok(SessionState::Locked)
 }
@@ -263,7 +341,8 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`RecoveryError::Store`] if protected state cannot be queried or updated.
+/// Returns [`RecoveryError::Store`] if protected state cannot be queried or updated, or
+/// [`RecoveryError::Transition`] if persisted state is inconsistent with the recovery graph.
 pub async fn recover_session<S, B>(
     store: &mut S,
     backend: &mut B,
@@ -278,47 +357,40 @@ where
 
     let session_id = active.id();
     let state = active.state();
+    let context = transition_context(&active);
 
     if state == SessionState::EmergencyPending {
         if restore_all_protections(backend).await {
             return Ok(SessionState::EmergencyPending);
         }
 
-        store.persist_transition(&Transition::new(
-            session_id,
+        let failed = SessionMachine::apply(
             SessionState::EmergencyPending,
-            SessionState::ProtectionFailure,
-        ))?;
+            SessionEvent::ProtectionFailed,
+            &context,
+        )?;
+        store.persist_transition(session_id, &failed)?;
         return Ok(SessionState::ProtectionFailure);
     }
 
     match state {
         SessionState::Arming | SessionState::Locked => {
-            store.persist_transition(&Transition::new(
-                session_id,
-                state,
-                SessionState::Recovering,
-            ))?;
+            let recovering =
+                SessionMachine::apply(state, SessionEvent::RecoveryStarted, &context)?;
+            store.persist_transition(session_id, &recovering)?;
         }
         SessionState::Recovering => {}
         other => return Ok(other),
     }
 
-    if restore_all_protections(backend).await {
-        store.persist_transition(&Transition::new(
-            session_id,
-            SessionState::Recovering,
-            SessionState::Locked,
-        ))?;
-        Ok(SessionState::Locked)
+    let event = if restore_all_protections(backend).await {
+        SessionEvent::RecoverySucceeded
     } else {
-        store.persist_transition(&Transition::new(
-            session_id,
-            SessionState::Recovering,
-            SessionState::ProtectionFailure,
-        ))?;
-        Ok(SessionState::ProtectionFailure)
-    }
+        SessionEvent::ProtectionFailed
+    };
+    let final_transition = SessionMachine::apply(SessionState::Recovering, event, &context)?;
+    store.persist_transition(session_id, &final_transition)?;
+    Ok(final_transition.to())
 }
 
 async fn restore_all_protections<B: PlatformBackend>(backend: &mut B) -> bool {

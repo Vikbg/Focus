@@ -5,6 +5,7 @@ use std::{error::Error, fmt, path::Path};
 use focus_core::{
     BootId, EmergencyRequest, EmergencyTimingState, PolicyVersion, ProfileId, RecoveryCodeHash,
     SESSION_POLICY_SCHEMA_VERSION, SessionId, SessionPolicySnapshot, SessionState,
+    ValidatedTransition,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -134,26 +135,6 @@ impl SecurityEvent {
     }
 }
 
-/// A persisted transition between two session states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Transition {
-    session_id: SessionId,
-    from: SessionState,
-    to: SessionState,
-}
-
-impl Transition {
-    /// Creates a transition record.
-    #[must_use]
-    pub const fn new(session_id: SessionId, from: SessionState, to: SessionState) -> Self {
-        Self {
-            session_id,
-            from,
-            to,
-        }
-    }
-}
-
 /// Complete immutable security context for the active protected session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredActiveSession {
@@ -244,12 +225,16 @@ pub trait FocusStore {
     /// Returns an error if the record cannot be encoded or persisted.
     fn set_active_session(&mut self, session: &StoredActiveSession) -> StoreResult<()>;
 
-    /// Atomically journals and applies one session-state transition.
+    /// Atomically journals and applies one domain-validated session-state transition.
     ///
     /// # Errors
     ///
     /// Returns an error if the stored source state does not match or the transaction fails.
-    fn persist_transition(&mut self, transition: &Transition) -> StoreResult<()>;
+    fn persist_transition(
+        &mut self,
+        session_id: SessionId,
+        transition: &ValidatedTransition,
+    ) -> StoreResult<()>;
 
     /// Appends one security-relevant event to the protected journal.
     ///
@@ -265,7 +250,8 @@ pub trait FocusStore {
     /// Returns an error if numeric fields cannot be encoded or the transaction fails.
     fn persist_emergency_request(&mut self, request: &EmergencyRequest) -> StoreResult<()>;
 
-    /// Atomically persists emergency timing, an optional journal event, and an optional transition.
+    /// Atomically persists emergency timing, an optional journal event, and an optional
+    /// domain-validated session transition.
     ///
     /// # Errors
     ///
@@ -274,7 +260,7 @@ pub trait FocusStore {
         &mut self,
         request: &EmergencyRequest,
         event: Option<&SecurityEvent>,
-        transition: Option<&Transition>,
+        transition: Option<(SessionId, &ValidatedTransition)>,
     ) -> StoreResult<()>;
 
     /// Restores the pending emergency request, if one exists.
@@ -617,14 +603,18 @@ impl FocusStore for SqliteStore {
         Ok(())
     }
 
-    fn persist_transition(&mut self, transition: &Transition) -> StoreResult<()> {
+    fn persist_transition(
+        &mut self,
+        session_id: SessionId,
+        transition: &ValidatedTransition,
+    ) -> StoreResult<()> {
         let transaction = self.connection.transaction()?;
         transaction.execute(
             "INSERT INTO session_transitions(session_id, from_state, to_state) VALUES(?1, ?2, ?3)",
             params![
-                encode_session_id(transition.session_id),
-                encode_state(transition.from),
-                encode_state(transition.to),
+                encode_session_id(session_id),
+                encode_state(transition.from()),
+                encode_state(transition.to()),
             ],
         )?;
 
@@ -632,9 +622,9 @@ impl FocusStore for SqliteStore {
             "UPDATE active_session SET state = ?1
              WHERE singleton = 1 AND session_id = ?2 AND state = ?3",
             params![
-                encode_state(transition.to),
-                encode_session_id(transition.session_id),
-                encode_state(transition.from),
+                encode_state(transition.to()),
+                encode_session_id(session_id),
+                encode_state(transition.from()),
             ],
         )?;
 
@@ -663,7 +653,7 @@ impl FocusStore for SqliteStore {
         &mut self,
         request: &EmergencyRequest,
         event: Option<&SecurityEvent>,
-        transition: Option<&Transition>,
+        transition: Option<(SessionId, &ValidatedTransition)>,
     ) -> StoreResult<()> {
         let requested_at = encode_u64(request.requested_at())?;
         let code_hash = request.code_hash().to_bytes();
@@ -699,23 +689,23 @@ impl FocusStore for SqliteStore {
             ],
         )?;
 
-        if let Some(transition) = transition {
+        if let Some((session_id, transition)) = transition {
             transaction.execute(
                 "INSERT INTO session_transitions(session_id, from_state, to_state)
                  VALUES(?1, ?2, ?3)",
                 params![
-                    encode_session_id(transition.session_id),
-                    encode_state(transition.from),
-                    encode_state(transition.to),
+                    encode_session_id(session_id),
+                    encode_state(transition.from()),
+                    encode_state(transition.to()),
                 ],
             )?;
             let changed = transaction.execute(
                 "UPDATE active_session SET state = ?1
                  WHERE singleton = 1 AND session_id = ?2 AND state = ?3",
                 params![
-                    encode_state(transition.to),
-                    encode_session_id(transition.session_id),
-                    encode_state(transition.from),
+                    encode_state(transition.to()),
+                    encode_session_id(session_id),
+                    encode_state(transition.from()),
                 ],
             )?;
             if changed != 1 {

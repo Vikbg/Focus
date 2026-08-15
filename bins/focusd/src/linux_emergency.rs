@@ -4,7 +4,7 @@ use focus_core::{EmergencyError, EmergencyEvaluation, EmergencyRequest};
 use focus_linux::ClockSampleError;
 use focus_storage::{FocusStore, StoreError};
 
-use crate::evaluate_emergency_unlock;
+use crate::{EmergencyUnlockError, evaluate_emergency_unlock};
 
 /// Error returned by the production Linux emergency-unlock timing path.
 #[derive(Debug)]
@@ -12,6 +12,7 @@ pub enum LinuxEmergencyError {
     Clock(ClockSampleError),
     Domain(EmergencyError),
     Store(StoreError),
+    Evaluation(EmergencyUnlockError),
 }
 
 impl fmt::Display for LinuxEmergencyError {
@@ -20,6 +21,7 @@ impl fmt::Display for LinuxEmergencyError {
             Self::Clock(error) => write!(formatter, "emergency clock error: {error}"),
             Self::Domain(error) => write!(formatter, "emergency request error: {error:?}"),
             Self::Store(error) => write!(formatter, "emergency store error: {error}"),
+            Self::Evaluation(error) => write!(formatter, "emergency evaluation error: {error}"),
         }
     }
 }
@@ -29,6 +31,7 @@ impl Error for LinuxEmergencyError {
         match self {
             Self::Clock(error) => Some(error),
             Self::Store(error) => Some(error),
+            Self::Evaluation(error) => Some(error),
             Self::Domain(_) => None,
         }
     }
@@ -49,6 +52,12 @@ impl From<EmergencyError> for LinuxEmergencyError {
 impl From<StoreError> for LinuxEmergencyError {
     fn from(error: StoreError) -> Self {
         Self::Store(error)
+    }
+}
+
+impl From<EmergencyUnlockError> for LinuxEmergencyError {
+    fn from(error: EmergencyUnlockError) -> Self {
+        Self::Evaluation(error)
     }
 }
 
@@ -73,7 +82,8 @@ pub fn begin_linux_emergency_request<S: FocusStore>(
 ///
 /// # Errors
 ///
-/// Returns an error when the Linux clock cannot be sampled or protected state cannot be updated.
+/// Returns an error when the Linux clock cannot be sampled, protected state cannot be updated,
+/// or the authoritative state machine rejects a required protection-failure transition.
 pub fn evaluate_linux_emergency_unlock<S: FocusStore>(
     store: &mut S,
     request: &mut EmergencyRequest,

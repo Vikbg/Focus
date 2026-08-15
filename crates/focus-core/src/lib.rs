@@ -22,5 +22,8 @@ pub use profile::{
 };
 pub use schedule::{Schedule, ScheduleId, ScheduleSource, ScheduleStatus, SchedulerOutcome};
 pub use session::SessionId;
-pub use state_machine::{SessionGuard, SessionState, TransitionError};
+pub use state_machine::{
+    SessionEvent, SessionMachine, SessionState, TransitionContext, TransitionError,
+    ValidatedTransition,
+};
 pub use vpn::VpnId;
