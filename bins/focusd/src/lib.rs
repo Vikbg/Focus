@@ -1,5 +1,7 @@
 //! Privileged Focus daemon service primitives.
 
+mod linux_emergency;
+
 use std::{
     error::Error,
     fmt, fs,
@@ -27,6 +29,9 @@ use nix::{
 };
 
 pub use focus_core::SessionState as DaemonState;
+pub use linux_emergency::{
+    LinuxEmergencyError, begin_linux_emergency_request, evaluate_linux_emergency_unlock,
+};
 
 const REQUIRED_GUARDS: [GuardKind; 4] = [
     GuardKind::Process,
@@ -152,6 +157,8 @@ impl PeerPolicy {
 
 /// Evaluates an emergency unlock observation, persists timing evidence, and handles anomalies.
 ///
+/// This low-level function accepts an explicit clock sample for deterministic tests and
+/// platform adapters. Production Linux code should call [`evaluate_linux_emergency_unlock`].
 /// Wall-clock and reboot events are journaled. A monotonic regression is treated as a
 /// clock-integrity failure and moves any active protected session to `ProtectionFailure`.
 ///
