@@ -135,10 +135,7 @@ fn compensation_failure_still_persists_protection_failure_and_reports_remaining_
     let error = block_on_ready(arm_session(&mut store, &mut backend, &session)).unwrap_err();
 
     assert_eq!(
-        error
-            .compensation_report()
-            .unwrap()
-            .remaining_guards(),
+        error.compensation_report().unwrap().remaining_guards(),
         &[GuardKind::Network]
     );
     assert_eq!(
