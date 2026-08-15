@@ -26,6 +26,7 @@ impl GuardKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformError {
     GuardFailed(GuardKind),
+    CloseBlockedAppsFailed,
 }
 
 /// Result returned by platform enforcement operations.
@@ -53,6 +54,11 @@ pub trait PlatformBackend {
     fn verify_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
+
+    /// Reverses one previously applied guard during best-effort arming compensation.
+    fn disarm_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// Production-safe placeholder used until a real operating-system backend is available.
@@ -72,6 +78,11 @@ impl PlatformBackend for FailClosedBackend {
 #[derive(Debug, Default)]
 pub struct FakeBackend {
     failing_guards: u8,
+    failing_verifications: u8,
+    failing_disarms: u8,
+    fail_close_blocked_apps: bool,
+    armed: Vec<GuardKind>,
+    disarmed: Vec<GuardKind>,
 }
 
 impl FakeBackend {
@@ -80,14 +91,78 @@ impl FakeBackend {
         self.failing_guards |= guard.bit();
     }
 
-    const fn should_fail(&self, guard: GuardKind) -> bool {
-        self.failing_guards & guard.bit() != 0
+    /// Configures one guard verification to fail.
+    pub const fn fail_verification(&mut self, guard: GuardKind) {
+        self.failing_verifications |= guard.bit();
+    }
+
+    /// Configures one compensation disarm attempt to fail.
+    pub const fn fail_disarm(&mut self, guard: GuardKind) {
+        self.failing_disarms |= guard.bit();
+    }
+
+    /// Configures the blocked-application close step to fail.
+    pub const fn fail_close_blocked_apps(&mut self) {
+        self.fail_close_blocked_apps = true;
+    }
+
+    /// Returns guards that were successfully armed, in application order.
+    #[must_use]
+    pub fn armed(&self) -> &[GuardKind] {
+        &self.armed
+    }
+
+    /// Returns guards whose disarm was attempted, in compensation order.
+    #[must_use]
+    pub fn disarmed(&self) -> &[GuardKind] {
+        &self.disarmed
+    }
+
+    const fn should_fail(mask: u8, guard: GuardKind) -> bool {
+        mask & guard.bit() != 0
     }
 }
 
 impl PlatformBackend for FakeBackend {
+    fn close_blocked_apps(&mut self) -> PlatformFuture<'_, ()> {
+        let should_fail = self.fail_close_blocked_apps;
+        Box::pin(async move {
+            if should_fail {
+                Err(PlatformError::CloseBlockedAppsFailed)
+            } else {
+                Ok(())
+            }
+        })
+    }
+
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
-        let should_fail = self.should_fail(guard);
+        let should_fail = Self::should_fail(self.failing_guards, guard);
+        if !should_fail {
+            self.armed.push(guard);
+        }
+        Box::pin(async move {
+            if should_fail {
+                Err(PlatformError::GuardFailed(guard))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn verify_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        let should_fail = Self::should_fail(self.failing_verifications, guard);
+        Box::pin(async move {
+            if should_fail {
+                Err(PlatformError::GuardFailed(guard))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn disarm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        let should_fail = Self::should_fail(self.failing_disarms, guard);
+        self.disarmed.push(guard);
         Box::pin(async move {
             if should_fail {
                 Err(PlatformError::GuardFailed(guard))
