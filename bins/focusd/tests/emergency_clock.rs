@@ -3,13 +3,33 @@ use focus_core::{
     SessionId, SessionState,
 };
 use focus_storage::{FocusStore, SqliteStore};
-use focusd::evaluate_emergency_unlock;
+use focusd::{
+    begin_linux_emergency_request, evaluate_emergency_unlock, evaluate_linux_emergency_unlock,
+};
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
 const BOOT_A: BootId = BootId(0xaaaa);
 
 const fn sample(monotonic_seconds: u64, unix_seconds: u64) -> EmergencyClockSample {
     EmergencyClockSample::new(BOOT_A, monotonic_seconds, unix_seconds)
+}
+
+#[test]
+fn production_emergency_path_samples_linux_clock_internally() {
+    let mut store = SqliteStore::open_in_memory().unwrap();
+    let mut request = begin_linux_emergency_request(
+        &mut store,
+        "Need a real emergency exit",
+        CODE,
+    )
+    .unwrap();
+
+    let evaluation = evaluate_linux_emergency_unlock(&mut store, &mut request, CODE).unwrap();
+
+    assert!(matches!(
+        evaluation.decision(),
+        EmergencyDecision::Waiting { remaining_seconds } if remaining_seconds > 0
+    ));
 }
 
 #[test]
