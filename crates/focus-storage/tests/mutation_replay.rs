@@ -43,7 +43,9 @@ fn mutation_reservation_survives_reconnect_and_restart() {
             reopened.reserve_mutation(42, fingerprint).unwrap(),
             MutationReservation::InProgress
         );
-        reopened.complete_mutation(42, b"1|42|status|Idle|-").unwrap();
+        reopened
+            .complete_mutation(42, b"1|42|status|Idle|-")
+            .unwrap();
     }
 
     {
