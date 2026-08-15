@@ -3,9 +3,7 @@ use focus_core::{
     Profile, ProfileId, RecoveryCodeHash, SessionId, SessionState,
 };
 use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
-use focusd::{
-    EmergencyUnlockError, begin_linux_emergency_request, evaluate_emergency_unlock,
-};
+use focusd::{EmergencyUnlockError, begin_linux_emergency_request, evaluate_emergency_unlock};
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
 const WRONG_CODE: &str = "ZZZZ-ZZZZ-ZZZZ-ZZZZ";
@@ -104,7 +102,10 @@ fn stale_emergency_request_from_another_session_is_rejected() {
 
     let result = evaluate_emergency_unlock(&mut store, &mut stale, clock, CODE);
 
-    assert!(matches!(result, Err(EmergencyUnlockError::SessionMismatch)));
+    assert!(matches!(
+        result,
+        Err(EmergencyUnlockError::SessionMismatch)
+    ));
     assert_eq!(
         store.active_session().unwrap().unwrap().state(),
         SessionState::EmergencyPending
