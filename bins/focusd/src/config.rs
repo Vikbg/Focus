@@ -1,4 +1,9 @@
-use std::{env, error::Error, fmt, path::{Path, PathBuf}};
+use std::{
+    env,
+    error::Error,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 const DEFAULT_CLI_PATH: &str = "/usr/bin/focusctl";
 
@@ -13,7 +18,9 @@ impl fmt::Display for RuntimeConfigError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingAllowedUid => formatter.write_str("FOCUS_ALLOWED_UID must be configured"),
-            Self::InvalidAllowedUid => formatter.write_str("FOCUS_ALLOWED_UID must be a valid numeric uid"),
+            Self::InvalidAllowedUid => {
+                formatter.write_str("FOCUS_ALLOWED_UID must be a valid numeric uid")
+            }
         }
     }
 }
