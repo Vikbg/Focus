@@ -43,8 +43,14 @@ fn daemon_handles_read_only_cli_commands() {
 }
 
 #[test]
-fn daemon_validates_vpn_command_ids() {
+fn daemon_handles_typed_vpn_commands() {
     assert_eq!(round_trip("vpn up 42"), "VPN up requested: 42\n");
     assert_eq!(round_trip("vpn down 42"), "VPN down requested: 42\n");
-    assert_eq!(round_trip("vpn up nope"), "Error: invalid VPN id\n");
+}
+
+#[test]
+fn cli_rejects_invalid_vpn_ids_before_ipc() {
+    let socket = temp_socket("invalid-vpn");
+    let error = focusctl::request_at(&socket, "vpn up nope").unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
 }
