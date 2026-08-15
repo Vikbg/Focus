@@ -21,6 +21,16 @@ fn emergency_recovery_code_is_mandatory() {
 }
 
 #[test]
+fn wall_clock_alone_cannot_satisfy_emergency_delay() {
+    let request = EmergencyRequest::new("Need to leave for a real emergency", 1_000, CODE).unwrap();
+
+    assert_ne!(
+        request.evaluate(1_000 + EMERGENCY_DELAY_SECONDS, CODE),
+        EmergencyDecision::Authorized
+    );
+}
+
+#[test]
 fn correct_code_at_nine_minutes_fifty_nine_seconds_is_denied() {
     let request = EmergencyRequest::new("Need to leave for a real emergency", 1_000, CODE).unwrap();
 
