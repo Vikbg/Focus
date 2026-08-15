@@ -172,8 +172,8 @@ impl PlatformBackend for FakeBackend {
     }
 
     fn verify_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
-        let should_fail = Self::should_fail(self.failing_verifications, guard)
-            || !self.guard_is_armed(guard);
+        let should_fail =
+            Self::should_fail(self.failing_verifications, guard) || !self.guard_is_armed(guard);
         Box::pin(async move {
             if should_fail {
                 Err(PlatformError::GuardFailed(guard))
