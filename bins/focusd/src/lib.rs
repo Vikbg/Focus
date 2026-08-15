@@ -251,10 +251,11 @@ where
 
 /// Recovers a persisted protected session after daemon restart.
 ///
-/// Persisted `Arming` and `Locked` sessions first transition to `Recovering`.
-/// Recovery then repeats preflight, closes blocked applications, rearms all critical
-/// guards, and verifies them before `Locked` may be persisted again. Any platform
-/// failure advances to `ProtectionFailure`.
+/// Persisted `Arming`, `Locked`, and `EmergencyPending` sessions first transition to
+/// `Recovering`. Recovery then repeats preflight, closes blocked applications, rearms all
+/// critical guards, and verifies them before the appropriate protected state is restored.
+/// Interrupted recovery restores `EmergencyPending` when a persisted emergency request exists.
+/// Any platform failure advances to `ProtectionFailure`.
 ///
 /// # Errors
 ///
@@ -273,29 +274,34 @@ where
 
     let session_id = active.id();
     let state = active.state();
-
-    let state = match state {
-        SessionState::Arming | SessionState::Locked => {
-            store.persist_transition(&Transition::new(
-                session_id,
-                state,
-                SessionState::Recovering,
-            ))?;
-            SessionState::Recovering
+    let target_state = match state {
+        SessionState::Arming | SessionState::Locked => SessionState::Locked,
+        SessionState::EmergencyPending => SessionState::EmergencyPending,
+        SessionState::Recovering => {
+            if store.emergency_request()?.is_some() {
+                SessionState::EmergencyPending
+            } else {
+                SessionState::Locked
+            }
         }
-        SessionState::Recovering => SessionState::Recovering,
         other => return Ok(other),
     };
 
-    debug_assert_eq!(state, SessionState::Recovering);
+    if state != SessionState::Recovering {
+        store.persist_transition(&Transition::new(
+            session_id,
+            state,
+            SessionState::Recovering,
+        ))?;
+    }
 
     if restore_all_protections(backend).await {
         store.persist_transition(&Transition::new(
             session_id,
             SessionState::Recovering,
-            SessionState::Locked,
+            target_state,
         ))?;
-        Ok(SessionState::Locked)
+        Ok(target_state)
     } else {
         store.persist_transition(&Transition::new(
             session_id,
