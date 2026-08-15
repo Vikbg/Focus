@@ -55,6 +55,19 @@ pub trait PlatformBackend {
     }
 }
 
+/// Production-safe placeholder used until a real operating-system backend is available.
+///
+/// This backend deliberately refuses every guard so a daemon can never advertise
+/// `Locked` merely because enforcement has not yet been implemented.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FailClosedBackend;
+
+impl PlatformBackend for FailClosedBackend {
+    fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        Box::pin(async move { Err(PlatformError::GuardFailed(guard)) })
+    }
+}
+
 /// Deterministic backend used by daemon tests without touching the host system.
 #[derive(Debug, Default)]
 pub struct FakeBackend {
