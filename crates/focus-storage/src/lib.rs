@@ -637,7 +637,7 @@ impl FocusStore for SqliteStore {
         transition: &ValidatedTransition,
     ) -> StoreResult<()> {
         let transaction = self.connection.transaction()?;
-        persist_transition_in_transaction(&transaction, session_id, transition)?;
+        persist_transition_in_transaction(&transaction, session_id, *transition)?;
         transaction.commit()?;
         Ok(())
     }
@@ -717,7 +717,7 @@ impl FocusStore for SqliteStore {
                 transaction.rollback()?;
                 return Err(StoreError::StateMismatch);
             }
-            persist_transition_in_transaction(&transaction, session_id, transition)?;
+            persist_transition_in_transaction(&transaction, session_id, *transition)?;
         }
 
         if let Some(event) = event {
@@ -803,7 +803,7 @@ impl FocusStore for SqliteStore {
 fn persist_transition_in_transaction(
     transaction: &rusqlite::Transaction<'_>,
     session_id: SessionId,
-    transition: &ValidatedTransition,
+    transition: ValidatedTransition,
 ) -> StoreResult<()> {
     transaction.execute(
         "INSERT INTO session_transitions(session_id, from_state, to_state) VALUES(?1, ?2, ?3)",
