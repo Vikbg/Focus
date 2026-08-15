@@ -48,6 +48,9 @@ pub trait PlatformBackend {
     }
 
     /// Arms one enforcement guard.
+    ///
+    /// Implementations must be idempotent because crash recovery can reapply a guard
+    /// whose platform side effect completed before the following state write.
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()>;
 
     /// Verifies that an armed guard is healthy before the daemon reports Locked.
@@ -56,6 +59,9 @@ pub trait PlatformBackend {
     }
 
     /// Reverses one previously applied guard during best-effort arming compensation.
+    ///
+    /// Implementations must be idempotent so retrying an uncertain compensation step
+    /// cannot create a new platform side effect.
     fn disarm_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
@@ -81,6 +87,7 @@ pub struct FakeBackend {
     failing_verifications: u8,
     failing_disarms: u8,
     fail_close_blocked_apps: bool,
+    active_guards: u8,
     armed: Vec<GuardKind>,
     disarmed: Vec<GuardKind>,
 }
@@ -106,7 +113,21 @@ impl FakeBackend {
         self.fail_close_blocked_apps = true;
     }
 
-    /// Returns guards that were successfully armed, in application order.
+    /// Marks a guard as already active without recording a new arm operation.
+    ///
+    /// This models a crash after the platform effect completed but before the next
+    /// protected-state write.
+    pub const fn prearm_guard(&mut self, guard: GuardKind) {
+        self.active_guards |= guard.bit();
+    }
+
+    /// Returns whether a guard is currently active in the fake platform state.
+    #[must_use]
+    pub const fn guard_is_armed(&self, guard: GuardKind) -> bool {
+        self.active_guards & guard.bit() != 0
+    }
+
+    /// Returns guards that produced a new successful platform arm effect, in order.
     #[must_use]
     pub fn armed(&self) -> &[GuardKind] {
         &self.armed
@@ -137,7 +158,8 @@ impl PlatformBackend for FakeBackend {
 
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
         let should_fail = Self::should_fail(self.failing_guards, guard);
-        if !should_fail {
+        if !should_fail && !self.guard_is_armed(guard) {
+            self.active_guards |= guard.bit();
             self.armed.push(guard);
         }
         Box::pin(async move {
@@ -150,7 +172,8 @@ impl PlatformBackend for FakeBackend {
     }
 
     fn verify_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
-        let should_fail = Self::should_fail(self.failing_verifications, guard);
+        let should_fail = Self::should_fail(self.failing_verifications, guard)
+            || !self.guard_is_armed(guard);
         Box::pin(async move {
             if should_fail {
                 Err(PlatformError::GuardFailed(guard))
@@ -163,6 +186,9 @@ impl PlatformBackend for FakeBackend {
     fn disarm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
         let should_fail = Self::should_fail(self.failing_disarms, guard);
         self.disarmed.push(guard);
+        if !should_fail {
+            self.active_guards &= !guard.bit();
+        }
         Box::pin(async move {
             if should_fail {
                 Err(PlatformError::GuardFailed(guard))
