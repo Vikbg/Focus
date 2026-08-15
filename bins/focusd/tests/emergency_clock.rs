@@ -1,6 +1,6 @@
 use focus_core::{
-    BootId, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyRequest, SessionId,
-    SessionState,
+    BootId, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyRequest,
+    SessionId, SessionState,
 };
 use focus_storage::{FocusStore, SqliteStore};
 use focusd::evaluate_emergency_unlock;
@@ -15,21 +15,12 @@ const fn sample(monotonic_seconds: u64, unix_seconds: u64) -> EmergencyClockSamp
 #[test]
 fn wall_clock_anomaly_is_journaled_and_timing_progress_is_persisted() {
     let mut store = SqliteStore::open_in_memory().unwrap();
-    let mut request = EmergencyRequest::new(
-        "Need a real emergency exit",
-        sample(100, 1_000),
-        CODE,
-    )
-    .unwrap();
+    let mut request =
+        EmergencyRequest::new("Need a real emergency exit", sample(100, 1_000), CODE).unwrap();
     store.persist_emergency_request(&request).unwrap();
 
-    let evaluation = evaluate_emergency_unlock(
-        &mut store,
-        &mut request,
-        sample(160, 1_600),
-        CODE,
-    )
-    .unwrap();
+    let evaluation =
+        evaluate_emergency_unlock(&mut store, &mut request, sample(160, 1_600), CODE).unwrap();
 
     assert_eq!(
         evaluation.decision(),
@@ -60,12 +51,8 @@ fn monotonic_regression_moves_active_session_to_protection_failure() {
     store
         .set_active_session(session_id, SessionState::EmergencyPending)
         .unwrap();
-    let mut request = EmergencyRequest::new(
-        "Need a real emergency exit",
-        sample(100, 1_000),
-        CODE,
-    )
-    .unwrap();
+    let mut request =
+        EmergencyRequest::new("Need a real emergency exit", sample(100, 1_000), CODE).unwrap();
     store.persist_emergency_request(&request).unwrap();
 
     let evaluation =
