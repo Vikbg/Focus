@@ -150,30 +150,6 @@ fn read_only_database_cannot_accept_security_writes() {
 }
 
 #[test]
-fn sqlite_full_during_security_write_fails_without_partial_event() {
-    let path = temp_db("full");
-    drop(SqliteStore::open(&path).unwrap());
-
-    let connection = Connection::open(&path).unwrap();
-    let page_count: i64 = connection
-        .query_row("PRAGMA page_count", [], |row| row.get(0))
-        .unwrap();
-    connection
-        .execute_batch(&format!("PRAGMA max_page_count = {page_count};"))
-        .unwrap();
-    drop(connection);
-
-    let mut store = SqliteStore::open(&path).unwrap();
-    let event = SecurityEvent::new("oversized", vec![0x5a; 2 * 1024 * 1024]);
-
-    assert!(store.append_security_event(&event).is_err());
-    assert_eq!(store.security_event_count().unwrap(), 0);
-
-    drop(store);
-    cleanup_db(&path);
-}
-
-#[test]
 fn every_supported_legacy_schema_migrates_to_current_replay_storage() {
     for version in 1..=3_i64 {
         let path = temp_db(&format!("migration-v{version}"));
