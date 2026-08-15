@@ -15,7 +15,10 @@ fn explicit_desktop_uid_and_cli_path_are_preserved() {
     let config = RuntimeConfig::from_values(Some("1000"), Some("/opt/focus/bin/focusctl")).unwrap();
 
     assert_eq!(config.allowed_uid(), 1000);
-    assert_eq!(config.cli_executable(), Path::new("/opt/focus/bin/focusctl"));
+    assert_eq!(
+        config.cli_executable(),
+        Path::new("/opt/focus/bin/focusctl")
+    );
 }
 
 #[test]
