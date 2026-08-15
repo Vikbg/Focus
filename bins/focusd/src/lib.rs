@@ -10,7 +10,7 @@ pub use service::{DaemonService, DaemonSnapshot, ProtectionHealth};
 use std::{
     error::Error,
     fmt, fs,
-    io::{self, BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     os::unix::{
         fs::PermissionsExt,
         net::{UnixListener, UnixStream},
@@ -26,8 +26,8 @@ use focus_core::{
 };
 use focus_platform::{GuardKind, PlatformBackend, PlatformError};
 use focus_protocol::{
-    ClientKind, ProtocolState, Request, RequestEnvelope, RequestId, Response, ResponseEnvelope,
-    ResponseError,
+    ClientKind, MAX_FRAME_BYTES, ProtocolState, Request, RequestEnvelope, RequestId, Response,
+    ResponseEnvelope, ResponseError,
 };
 use focus_storage::{FocusStore, SecurityEvent, StoreError, StoredActiveSession};
 use nix::{
@@ -570,14 +570,14 @@ fn protocol_state(state: DaemonState) -> ProtocolState {
     }
 }
 
-fn response_for(request: Request, state: DaemonState) -> Response {
+fn response_for(request: &Request, state: DaemonState) -> Response {
     match request {
         Request::GetStatus => Response::Status(protocol_state(state)),
         Request::GetSession => Response::Session(protocol_state(state)),
         Request::Doctor => Response::DoctorReachable,
         Request::GetVpnList => Response::VpnListEmpty,
-        Request::VpnUp { id } => Response::VpnUpRequested(id),
-        Request::VpnDown { id } => Response::VpnDownRequested(id),
+        Request::VpnUp { id } => Response::VpnUpRequested(*id),
+        Request::VpnDown { id } => Response::VpnDownRequested(*id),
         _ => Response::Error(ResponseError::UnsupportedRequest),
     }
 }
@@ -594,9 +594,22 @@ fn write_response(
 }
 
 fn read_request(stream: &UnixStream) -> io::Result<Result<RequestEnvelope, ResponseError>> {
-    let mut request = String::new();
-    BufReader::new(stream.try_clone()?).read_line(&mut request)?;
-    match RequestEnvelope::decode(request.trim()) {
+    let mut frame = Vec::with_capacity(1024);
+    let mut reader = BufReader::new(stream.try_clone()?).take((MAX_FRAME_BYTES + 1) as u64);
+    reader.read_until(b'\n', &mut frame)?;
+
+    if frame.len() > MAX_FRAME_BYTES || !frame.ends_with(b"\n") {
+        return Ok(Err(ResponseError::InvalidRequest));
+    }
+    frame.pop();
+    if frame.last() == Some(&b'\r') {
+        frame.pop();
+    }
+    let Ok(request) = std::str::from_utf8(&frame) else {
+        return Ok(Err(ResponseError::InvalidRequest));
+    };
+
+    match RequestEnvelope::decode(request) {
         Ok(envelope) => Ok(Ok(envelope)),
         Err(_) => Ok(Err(ResponseError::InvalidRequest)),
     }
@@ -630,7 +643,7 @@ fn serve_stream_as(
     write_response(
         stream,
         envelope.request_id(),
-        response_for(envelope.request(), state),
+        response_for(&envelope.request(), state),
     )
 }
 
@@ -671,7 +684,7 @@ fn serve_stream_with_peer_policy(
     write_response(
         stream,
         envelope.request_id(),
-        response_for(envelope.request(), state),
+        response_for(&envelope.request(), state),
     )
 }
 
