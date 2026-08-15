@@ -457,12 +457,6 @@ where
         return Err(ArmError::ActiveSessionExists);
     }
 
-    let transition = SessionMachine::apply(
-        session.state(),
-        SessionEvent::ArmSucceeded,
-        &transition_context(session),
-    )?;
-
     backend.preflight().await?;
     store.set_active_session(session)?;
     let mut coordinator = ArmingCoordinator::new(backend);
@@ -482,6 +476,11 @@ where
         }
     }
 
+    let transition = SessionMachine::apply(
+        session.state(),
+        SessionEvent::ArmSucceeded,
+        &transition_context(session),
+    )?;
     store.persist_transition(session.id(), &transition)?;
     Ok(SessionState::Locked)
 }
@@ -619,102 +618,142 @@ fn read_request(stream: &UnixStream) -> io::Result<Result<RequestEnvelope, Respo
 }
 
 fn serve_stream_as(
-    stream: &UnixStream,
+    stream: &mut UnixStream,
     state: DaemonState,
-    peer_policy: &PeerPolicy,
     authenticated_client: ClientKind,
 ) -> io::Result<()> {
-    if !peer_policy.authenticate_peer(stream) {
-        return write_response(
-            &mut stream.try_clone()?,
-            RequestId(0),
-            Response::Error(ResponseError::PeerAuthenticationFailed),
-        );
-    }
-
     let envelope = match read_request(stream)? {
         Ok(envelope) => envelope,
-        Err(error) => {
-            return write_response(
-                &mut stream.try_clone()?,
-                RequestId(0),
-                Response::Error(error),
-            );
-        }
+        Err(error) => return write_response(stream, RequestId(0), Response::Error(error)),
     };
 
     if !envelope.is_compatible() {
         return write_response(
-            &mut stream.try_clone()?,
+            stream,
             envelope.request_id(),
             Response::Error(ResponseError::UnsupportedProtocolVersion),
         );
     }
-
     if !envelope.is_authorized_as(authenticated_client) {
         return write_response(
-            &mut stream.try_clone()?,
+            stream,
             envelope.request_id(),
             Response::Error(ResponseError::Unauthorized),
         );
     }
 
-    let request_id = envelope.request_id();
-    let request = envelope.into_request();
-    let response = response_for(&request, state);
-    write_response(&mut stream.try_clone()?, request_id, response)
+    write_response(
+        stream,
+        envelope.request_id(),
+        response_for(&envelope.request(), state),
+    )
 }
 
-/// Serves one authenticated request from a local client connection.
-///
-/// This compatibility entry point is intentionally restricted to the CLI capability set.
-/// Production uses [`DaemonRuntime`] for long-lived concurrent service.
-pub fn serve_stream(
-    stream: &UnixStream,
+fn serve_stream_with_peer_policy(
+    stream: &mut UnixStream,
     state: DaemonState,
-    peer_policy: &PeerPolicy,
+    policy: &PeerPolicy,
 ) -> io::Result<()> {
-    serve_stream_as(stream, state, peer_policy, ClientKind::Cli)
+    if !policy.authenticate_peer(stream) {
+        return write_response(
+            stream,
+            RequestId(0),
+            Response::Error(ResponseError::PeerAuthenticationFailed),
+        );
+    }
+
+    stream.set_read_timeout(Some(IPC_READ_TIMEOUT))?;
+    let envelope = match read_request(stream)? {
+        Ok(envelope) => envelope,
+        Err(error) => return write_response(stream, RequestId(0), Response::Error(error)),
+    };
+
+    if !envelope.is_compatible() {
+        return write_response(
+            stream,
+            envelope.request_id(),
+            Response::Error(ResponseError::UnsupportedProtocolVersion),
+        );
+    }
+    if !envelope.is_authorized_as(ClientKind::Cli) {
+        return write_response(
+            stream,
+            envelope.request_id(),
+            Response::Error(ResponseError::Unauthorized),
+        );
+    }
+
+    write_response(
+        stream,
+        envelope.request_id(),
+        response_for(&envelope.request(), state),
+    )
 }
 
-/// Binds and hardens the production Unix socket.
-///
-/// The socket is owner-only and transferred to the configured desktop UID so only the
-/// authenticated local desktop user can connect before the executable identity check.
-///
-/// # Errors
-///
-/// Returns an I/O error if the parent directory, socket, permissions, or ownership cannot
-/// be created or configured.
-pub fn bind_production_socket(
-    socket_path: &Path,
-    peer_policy: &PeerPolicy,
-) -> io::Result<UnixListener> {
-    if let Some(parent) = socket_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+fn bind_test_socket(socket_path: &Path) -> io::Result<UnixListener> {
     if socket_path.exists() {
         fs::remove_file(socket_path)?;
+    }
+    UnixListener::bind(socket_path)
+}
+
+fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
+    if socket_path.exists() {
+        fs::remove_file(socket_path)?;
+    }
+    if let Some(parent) = socket_path.parent() {
+        fs::create_dir_all(parent)?;
     }
 
     let listener = UnixListener::bind(socket_path)?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))?;
-    chown(socket_path, Some(Uid::from_raw(peer_policy.allowed_uid)), None)
-        .map_err(io::Error::other)?;
+    chown(socket_path, Some(Uid::from_raw(policy.allowed_uid)), None).map_err(io::Error::other)?;
     Ok(listener)
 }
 
-/// Accepts one connection and rejects peers before reading any request bytes.
+/// Serves one authenticated CLI request for integration tests and then exits.
 ///
 /// # Errors
 ///
-/// Returns an I/O error if the socket cannot be bound or the first connection cannot be accepted.
-pub fn serve_once(
+/// Returns an I/O error when the socket cannot be created or the request cannot be served.
+pub fn serve_once(socket_path: &Path, state: DaemonState) -> io::Result<()> {
+    let listener = bind_test_socket(socket_path)?;
+    let (mut stream, _) = listener.accept()?;
+    serve_stream_as(&mut stream, state, ClientKind::Cli)
+}
+
+/// Serves one request while authenticating the real Unix peer credentials.
+///
+/// # Errors
+///
+/// Returns an I/O error when the socket cannot be created, ownership cannot be applied,
+/// or the request cannot be served.
+pub fn serve_once_with_peer_policy(
     socket_path: &Path,
     state: DaemonState,
-    peer_policy: &PeerPolicy,
+    policy: &PeerPolicy,
 ) -> io::Result<()> {
-    let listener = bind_production_socket(socket_path, peer_policy)?;
-    let (stream, _) = listener.accept()?;
-    serve_stream(&stream, state, peer_policy)
+    let listener = bind_production_socket(socket_path, policy)?;
+    let (mut stream, _) = listener.accept()?;
+    serve_stream_with_peer_policy(&mut stream, state, policy)
+}
+
+/// Runs the persistent production Unix-socket server.
+///
+/// # Errors
+///
+/// Returns an I/O error if the listening socket cannot be created or configured.
+pub fn serve_forever(
+    socket_path: &Path,
+    state: DaemonState,
+    policy: &PeerPolicy,
+) -> io::Result<()> {
+    let listener = bind_production_socket(socket_path, policy)?;
+    for incoming in listener.incoming() {
+        let Ok(mut stream) = incoming else {
+            continue;
+        };
+        let _ = serve_stream_with_peer_policy(&mut stream, state, policy);
+    }
+    Ok(())
 }
