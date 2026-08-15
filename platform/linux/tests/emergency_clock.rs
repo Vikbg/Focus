@@ -5,7 +5,7 @@ use focus_linux::{parse_boot_id, parse_uptime_seconds, sample_emergency_clock};
 fn parses_linux_boot_id_uuid() {
     assert_eq!(
         parse_boot_id("550e8400-e29b-41d4-a716-446655440000\n").unwrap(),
-        BootId(0x550e8400e29b41d4a716446655440000)
+        BootId(0x550e_8400_e29b_41d4_a716_4466_5544_0000)
     );
 }
 
