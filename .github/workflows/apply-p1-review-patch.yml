@@ -22,42 +22,43 @@ jobs:
 
           path = Path("bins/focusd/src/lib.rs")
           text = path.read_text(encoding="utf-8")
+          i = " " * 4
+          ii = " " * 8
 
-          old = '''    if store.active_session()?.is_some() {
-              return Err(ArmError::ActiveSessionExists);
-          }
-
-          backend.preflight().await?;
-          store.set_active_session(session)?;
-          let mut coordinator = ArmingCoordinator::new(backend);
-          '''
-          new = '''    if store.active_session()?.is_some() {
-              return Err(ArmError::ActiveSessionExists);
-          }
-
-          let transition = SessionMachine::apply(
-              session.state(),
-              SessionEvent::ArmSucceeded,
-              &transition_context(session),
-          )?;
-
-          backend.preflight().await?;
-          store.set_active_session(session)?;
-          let mut coordinator = ArmingCoordinator::new(backend);
-          '''
+          old = (
+              f"{i}if store.active_session()?.is_some() {{\n"
+              f"{ii}return Err(ArmError::ActiveSessionExists);\n"
+              f"{i}}}\n\n"
+              f"{i}backend.preflight().await?;\n"
+              f"{i}store.set_active_session(session)?;\n"
+              f"{i}let mut coordinator = ArmingCoordinator::new(backend);\n"
+          )
+          new = (
+              f"{i}if store.active_session()?.is_some() {{\n"
+              f"{ii}return Err(ArmError::ActiveSessionExists);\n"
+              f"{i}}}\n\n"
+              f"{i}let transition = SessionMachine::apply(\n"
+              f"{ii}session.state(),\n"
+              f"{ii}SessionEvent::ArmSucceeded,\n"
+              f"{ii}&transition_context(session),\n"
+              f"{i})?;\n\n"
+              f"{i}backend.preflight().await?;\n"
+              f"{i}store.set_active_session(session)?;\n"
+              f"{i}let mut coordinator = ArmingCoordinator::new(backend);\n"
+          )
           if text.count(old) != 1:
               raise SystemExit("unexpected arm_session prelude")
           text = text.replace(old, new, 1)
 
-          late = '''    let transition = SessionMachine::apply(
-              session.state(),
-              SessionEvent::ArmSucceeded,
-              &transition_context(session),
-          )?;
-          store.persist_transition(session.id(), &transition)?;
-          '''
-          replacement = '''    store.persist_transition(session.id(), &transition)?;
-          '''
+          late = (
+              f"{i}let transition = SessionMachine::apply(\n"
+              f"{ii}session.state(),\n"
+              f"{ii}SessionEvent::ArmSucceeded,\n"
+              f"{ii}&transition_context(session),\n"
+              f"{i})?;\n"
+              f"{i}store.persist_transition(session.id(), &transition)?;\n"
+          )
+          replacement = f"{i}store.persist_transition(session.id(), &transition)?;\n"
           if text.count(late) != 1:
               raise SystemExit("unexpected late arming transition")
           text = text.replace(late, replacement, 1)
