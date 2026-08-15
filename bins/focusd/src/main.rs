@@ -24,9 +24,8 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let database_path = PathBuf::from(
-        env::var("FOCUS_DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.to_owned()),
-    );
+    let database_path =
+        PathBuf::from(env::var("FOCUS_DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.to_owned()));
     let socket_path = PathBuf::from(
         env::var("FOCUS_SOCKET_PATH").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_owned()),
     );
