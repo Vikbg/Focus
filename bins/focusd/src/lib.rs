@@ -172,21 +172,24 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
     clock: EmergencyClockSample,
     recovery_code: &str,
 ) -> Result<EmergencyEvaluation, StoreError> {
-    let evaluation = request.evaluate(clock, recovery_code);
-    store.persist_emergency_request(request)?;
+    let mut candidate = request.clone();
+    let evaluation = candidate.evaluate(clock, recovery_code);
 
-    if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure
-        && let Some(active) = store.active_session()?
-        && active.state() != SessionState::ProtectionFailure
-    {
-        store.persist_transition(&Transition::new(
-            active.id(),
-            active.state(),
-            SessionState::ProtectionFailure,
-        ))?;
-    }
+    let transition = if evaluation.decision() == EmergencyDecision::ClockIntegrityFailure {
+        store.active_session()?.and_then(|active| {
+            (active.state() != SessionState::ProtectionFailure).then(|| {
+                Transition::new(
+                    active.id(),
+                    active.state(),
+                    SessionState::ProtectionFailure,
+                )
+            })
+        })
+    } else {
+        None
+    };
 
-    if evaluation.clock_event() != EmergencyClockEvent::None {
+    let event = if evaluation.clock_event() != EmergencyClockEvent::None {
         let event_type = match evaluation.clock_event() {
             EmergencyClockEvent::None => unreachable!(),
             EmergencyClockEvent::WallClockAnomaly => "emergency_clock_wall_anomaly",
@@ -194,15 +197,19 @@ pub fn evaluate_emergency_unlock<S: FocusStore>(
             EmergencyClockEvent::MonotonicRegression => "emergency_clock_monotonic_regression",
         };
         let payload = format!(
-            "boot_id={:032x};monotonic={};unix={}",
+            "boot_id={:032x};monotonic_nanos={};unix={}",
             clock.boot_id().0,
-            clock.monotonic_seconds(),
+            clock.monotonic_nanos(),
             clock.unix_seconds()
         )
         .into_bytes();
-        store.append_security_event(&SecurityEvent::new(event_type, payload))?;
-    }
+        Some(SecurityEvent::new(event_type, payload))
+    } else {
+        None
+    };
 
+    store.persist_emergency_observation(&candidate, event.as_ref(), transition.as_ref())?;
+    *request = candidate;
     Ok(evaluation)
 }
 
