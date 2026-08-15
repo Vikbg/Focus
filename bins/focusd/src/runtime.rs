@@ -80,7 +80,7 @@ async fn read_request(
     }
 }
 
-const fn is_read_only(request: Request) -> bool {
+const fn is_read_only(request: &Request) -> bool {
     matches!(
         request,
         Request::GetStatus
@@ -141,14 +141,15 @@ where
         .await;
     }
 
-    let request = envelope.request();
-    let response = if is_read_only(request) {
+    let request_id = envelope.request_id();
+    let request = envelope.into_request();
+    let response = if is_read_only(&request) {
         response_for(request, snapshot_state(&snapshot))
     } else {
         service.lock().await.handle(request)
     };
 
-    write_response(&mut stream, envelope.request_id(), response).await
+    write_response(&mut stream, request_id, response).await
 }
 
 /// Concurrent production runtime around the single authoritative daemon service.
