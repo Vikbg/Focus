@@ -11,6 +11,7 @@ use std::{
         net::{UnixListener, UnixStream},
     },
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use focus_core::{
@@ -39,6 +40,7 @@ const REQUIRED_GUARDS: [GuardKind; 4] = [
     GuardKind::Browser,
     GuardKind::Privilege,
 ];
+const IPC_READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Error returned while arming a protected Focus session.
 #[derive(Debug)]
@@ -128,11 +130,7 @@ impl PeerPolicy {
         }
     }
 
-    fn authenticate(&self, stream: &UnixStream, claimed: ClientKind) -> bool {
-        if claimed != ClientKind::Cli {
-            return false;
-        }
-
+    fn authenticate_peer(&self, stream: &UnixStream) -> bool {
         let Ok(credentials) = getsockopt(stream, PeerCredentials) else {
             return false;
         };
@@ -428,6 +426,15 @@ fn serve_stream_with_peer_policy(
     state: DaemonState,
     policy: &PeerPolicy,
 ) -> io::Result<()> {
+    if !policy.authenticate_peer(stream) {
+        return write_response(
+            stream,
+            RequestId(0),
+            Response::Error(ResponseError::PeerAuthenticationFailed),
+        );
+    }
+
+    stream.set_read_timeout(Some(IPC_READ_TIMEOUT))?;
     let envelope = match read_request(stream)? {
         Ok(envelope) => envelope,
         Err(error) => return write_response(stream, RequestId(0), Response::Error(error)),
@@ -440,14 +447,7 @@ fn serve_stream_with_peer_policy(
             Response::Error(ResponseError::UnsupportedProtocolVersion),
         );
     }
-    if !policy.authenticate(stream, envelope.client()) {
-        return write_response(
-            stream,
-            envelope.request_id(),
-            Response::Error(ResponseError::PeerAuthenticationFailed),
-        );
-    }
-    if !envelope.is_authorized_as(envelope.client()) {
+    if !envelope.is_authorized_as(ClientKind::Cli) {
         return write_response(
             stream,
             envelope.request_id(),
