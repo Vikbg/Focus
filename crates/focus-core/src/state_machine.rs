@@ -104,13 +104,10 @@ impl SessionMachine {
         let target = match (state, event) {
             (SessionState::Idle, SessionEvent::BeginPreflight) => SessionState::Preflight,
             (SessionState::Preflight, SessionEvent::PreflightPassed) => SessionState::Arming,
-            (SessionState::Arming, SessionEvent::ArmSucceeded) => SessionState::Locked,
-            (SessionState::Arming, SessionEvent::ArmFailed) => SessionState::ProtectionFailure,
-            (SessionState::Arming | SessionState::Locked, SessionEvent::RecoveryStarted) => {
-                SessionState::Recovering
-            }
-            (SessionState::Recovering, SessionEvent::RecoverySucceeded) => SessionState::Locked,
-            (
+            (SessionState::Arming, SessionEvent::ArmSucceeded)
+            | (SessionState::Recovering, SessionEvent::RecoverySucceeded) => SessionState::Locked,
+            (SessionState::Arming, SessionEvent::ArmFailed)
+            | (
                 SessionState::Preflight
                 | SessionState::Arming
                 | SessionState::Locked
@@ -120,6 +117,9 @@ impl SessionMachine {
                 | SessionState::Recovering,
                 SessionEvent::ProtectionFailed,
             ) => SessionState::ProtectionFailure,
+            (SessionState::Arming | SessionState::Locked, SessionEvent::RecoveryStarted) => {
+                SessionState::Recovering
+            }
             (SessionState::Locked, SessionEvent::EmergencyRequested) => {
                 SessionState::EmergencyPending
             }
@@ -131,10 +131,10 @@ impl SessionMachine {
             {
                 return Err(TransitionError::MinimumDurationNotReached);
             }
-            (SessionState::Locked, SessionEvent::EndRequested)
-            | (SessionState::EmergencyAuthorized, SessionEvent::EndRequested) => {
-                SessionState::Ending
-            }
+            (
+                SessionState::Locked | SessionState::EmergencyAuthorized,
+                SessionEvent::EndRequested,
+            ) => SessionState::Ending,
             (SessionState::Ending, SessionEvent::EndCompleted) => SessionState::Idle,
             _ => return Err(TransitionError::InvalidTransition),
         };
