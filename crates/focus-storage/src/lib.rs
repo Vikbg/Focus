@@ -119,7 +119,7 @@ pub trait FocusStore {
     fn transition_count(&self) -> StoreResult<u64>;
 }
 
-/// SQLite implementation of the protected Focus store.
+/// `SQLite` implementation of the protected Focus store.
 pub struct SqliteStore {
     connection: Connection,
 }
@@ -129,7 +129,7 @@ impl SqliteStore {
     ///
     /// # Errors
     ///
-    /// Returns an error when SQLite cannot create or migrate the store.
+    /// Returns an error when `SQLite` cannot create or migrate the store.
     pub fn open_in_memory() -> StoreResult<Self> {
         let connection = Connection::open_in_memory()?;
         let store = Self { connection };
