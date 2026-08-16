@@ -1,0 +1,86 @@
+name: Apply safe socket bind
+
+on:
+  push:
+    branches:
+      - "agent/audit-remediation-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Apply exact socket bind patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("bins/focusd/src/lib.rs")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
+              if socket_path.exists() {
+                  fs::remove_file(socket_path)?;
+              }
+              if let Some(parent) = socket_path.parent() {
+                  fs::create_dir_all(parent)?;
+              }
+
+              let listener = UnixListener::bind(socket_path)?;
+          '''.replace("              ", "")
+
+          new = '''pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
+              if let Some(parent) = socket_path.parent() {
+                  fs::create_dir_all(parent)?;
+              }
+
+              match fs::symlink_metadata(socket_path) {
+                  Ok(metadata) => {
+                      use std::os::unix::fs::FileTypeExt;
+
+                      if !metadata.file_type().is_socket() {
+                          return Err(io::Error::new(
+                              io::ErrorKind::AlreadyExists,
+                              "refusing to replace a non-socket IPC path",
+                          ));
+                      }
+
+                      match UnixStream::connect(socket_path) {
+                          Ok(_) => {
+                              return Err(io::Error::new(
+                                  io::ErrorKind::AddrInUse,
+                                  "Focus daemon socket is already active",
+                              ));
+                          }
+                          Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+                              fs::remove_file(socket_path)?;
+                          }
+                          Err(error) => return Err(error),
+                      }
+                  }
+                  Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                  Err(error) => return Err(error),
+              }
+
+              let listener = UnixListener::bind(socket_path)?;
+          '''.replace("              ", "")
+
+          if text.count(old) != 1:
+              raise SystemExit("unexpected production socket bind body")
+
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          rm .github/workflows/apply-safe-socket-bind.yml
+
+      - name: Commit safe socket bind
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bins/focusd/src/lib.rs .github/workflows/apply-safe-socket-bind.yml
+          git commit -m "fix: bind production socket safely"
+          git push
