@@ -190,6 +190,7 @@ async fn shutdown_never_removes_a_replacement_path() {
     let _ = shutdown_tx.send(());
     server.await.unwrap();
 
+    assert!(fs::metadata(&socket).unwrap().is_file());
     assert_eq!(fs::read(&socket).unwrap(), b"replacement sentinel");
     let _ = fs::remove_file(socket);
 }
