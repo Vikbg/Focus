@@ -4,8 +4,7 @@ use std::{error::Error, fmt, path::Path};
 
 use focus_core::{
     BootId, EmergencyRequest, EmergencyTimingState, PolicyVersion, ProfileId, RecoveryCodeHash,
-    SESSION_POLICY_SCHEMA_VERSION, SessionId, SessionPolicySnapshot, SessionState,
-    ValidatedTransition,
+    SessionId, SessionPolicySnapshot, SessionState, ValidatedTransition,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -676,7 +675,7 @@ impl FocusStore for SqliteStore {
                 encode_state(session.state()),
                 encode_profile_id(session.policy_snapshot().profile_id()),
                 encode_u64(session.policy_snapshot().profile_version().0)?,
-                i64::from(SESSION_POLICY_SCHEMA_VERSION),
+                i64::from(session.policy_snapshot().schema_version()),
                 policy_payload.as_slice(),
                 policy_sha256.as_slice(),
                 encode_u64(session.started_at_unix_ms())?,
