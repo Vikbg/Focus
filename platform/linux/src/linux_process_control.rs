@@ -21,7 +21,8 @@ impl LinuxProcessInventorySource for ProcfsExecutionFactSource {
         let mut process_ids = Vec::new();
         for entry in fs::read_dir("/proc")? {
             let entry = entry?;
-            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
                 continue;
             };
             let Ok(pid) = name.parse::<u32>() else {
@@ -58,6 +59,12 @@ pub trait ProcessHandleOps {
     fn terminate_process(&mut self, handle: &Self::Handle) -> io::Result<()>;
 }
 
+/// Stable Linux handle paired with the process lifetime it was opened for.
+pub struct LinuxProcessHandle<H> {
+    lifetime: ProcessLifetime,
+    inner: H,
+}
+
 /// Linux adapter that combines procfs observations with stable process handles.
 pub struct LinuxProcessControl<S, O> {
     source: S,
@@ -88,7 +95,7 @@ where
     S: LinuxProcessInventorySource,
     O: ProcessHandleOps,
 {
-    type Handle = O::Handle;
+    type Handle = LinuxProcessHandle<O::Handle>;
 
     fn process_ids(&self) -> Result<Vec<u32>, ProcessCloseError> {
         self.source
@@ -108,16 +115,21 @@ where
         &mut self,
         lifetime: ProcessLifetime,
     ) -> Result<Self::Handle, ProcessCloseError> {
-        self.handle_ops
+        let inner = self
+            .handle_ops
             .open_process(lifetime.pid())
-            .map_err(|_| ProcessCloseError::HandleOpenFailed(lifetime.pid()))
+            .map_err(|_| ProcessCloseError::HandleOpenFailed(lifetime.pid()))?;
+        Ok(LinuxProcessHandle { lifetime, inner })
     }
 
     fn revalidate_process_handle(
         &mut self,
-        _handle: &Self::Handle,
+        handle: &Self::Handle,
         expected: ProcessLifetime,
     ) -> Result<(), ProcessCloseError> {
+        if handle.lifetime != expected {
+            return Err(ProcessCloseError::LifetimeChanged(expected.pid()));
+        }
         match read_process_lifetime(&self.source, expected.pid(), "revalidation stat") {
             Ok(current) if current == expected => Ok(()),
             Ok(_) => Err(ProcessCloseError::LifetimeChanged(expected.pid())),
@@ -130,11 +142,7 @@ where
 
     fn terminate_process(&mut self, handle: &Self::Handle) -> Result<(), ProcessCloseError> {
         self.handle_ops
-            .terminate_process(handle)
-            .map_err(|_| ProcessCloseError::TerminationFailed(handle_pid_unavailable()))
+            .terminate_process(&handle.inner)
+            .map_err(|_| ProcessCloseError::TerminationFailed(handle.lifetime.pid()))
     }
-}
-
-const fn handle_pid_unavailable() -> u32 {
-    0
 }
