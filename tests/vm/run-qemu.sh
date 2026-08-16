@@ -25,7 +25,16 @@ done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workdir="$(mktemp -d -t focus-vm.XXXXXX)"
-trap 'rm -rf "$workdir"' EXIT INT TERM
+qemu_pid=""
+
+cleanup() {
+  if [[ -n "$qemu_pid" ]] && kill -0 "$qemu_pid" 2>/dev/null; then
+    kill "$qemu_pid" 2>/dev/null || true
+    wait "$qemu_pid" 2>/dev/null || true
+  fi
+  rm -rf "$workdir"
+}
+trap cleanup EXIT INT TERM
 
 overlay="$workdir/overlay.qcow2"
 seed="$workdir/seed.img"
@@ -128,9 +137,11 @@ if [[ "$scenario" == "suspend-resume" ]]; then
   qemu_pid=$!
   wake_suspended_guest
   if ! wait "$qemu_pid"; then
+    qemu_pid=""
     cat "$log" >&2
     exit 1
   fi
+  qemu_pid=""
   cat "$log"
 else
   timeout --signal=TERM 12m "${qemu[@]}" 2>&1 | tee "$log"
