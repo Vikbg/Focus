@@ -2,6 +2,8 @@
 
 use std::{future::Future, pin::Pin};
 
+use focus_core::ProcessEnforcementPlan;
+
 /// Platform guard categories controlled by the daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuardKind {
@@ -43,26 +45,47 @@ pub trait PlatformBackend {
         Box::pin(async { Ok(()) })
     }
 
-    /// Closes applications forbidden by the frozen session policy.
-    fn close_blocked_apps(&mut self) -> PlatformFuture<'_, ()> {
+    /// Closes applications forbidden by the exact frozen process plan.
+    fn close_blocked_apps<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
         Box::pin(async { Ok(()) })
     }
 
-    /// Arms one enforcement guard.
+    /// Arms the process guard against the exact frozen process plan.
     ///
-    /// Implementations must be idempotent because crash recovery can reapply a guard
-    /// whose platform side effect completed before the following state write.
+    /// Implementations must be idempotent because crash recovery can reapply the same plan after
+    /// the platform side effect completed but before the following protected-state write.
+    fn arm_process_guard<'a>(
+        &'a mut self,
+        plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()>;
+
+    /// Verifies that the process guard is healthy and enforcing the expected frozen policy digest.
+    fn verify_process_guard(
+        &mut self,
+        expected_policy_digest: [u8; 32],
+    ) -> PlatformFuture<'_, ()>;
+
+    /// Arms one non-process enforcement guard.
+    ///
+    /// The daemon uses [`Self::arm_process_guard`] for [`GuardKind::Process`]. Implementations
+    /// should still fail closed if generic process arming is attempted elsewhere.
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()>;
 
-    /// Verifies that an armed guard is healthy before the daemon reports Locked.
+    /// Verifies one non-process guard before the daemon reports Locked.
+    ///
+    /// The daemon uses [`Self::verify_process_guard`] for [`GuardKind::Process`].
     fn verify_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
 
     /// Reverses one previously applied guard during best-effort arming compensation.
     ///
-    /// Implementations must be idempotent so retrying an uncertain compensation step
-    /// cannot create a new platform side effect.
+    /// Implementations must be idempotent so retrying an uncertain compensation step cannot create
+    /// a new platform side effect. Process compensation also uses this method after a successful
+    /// typed process arm.
     fn disarm_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
@@ -70,12 +93,26 @@ pub trait PlatformBackend {
 
 /// Production-safe placeholder used until a real operating-system backend is available.
 ///
-/// This backend deliberately refuses every guard so a daemon can never advertise
-/// `Locked` merely because enforcement has not yet been implemented.
+/// This backend deliberately refuses every guard so a daemon can never advertise `Locked` merely
+/// because enforcement has not yet been implemented.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FailClosedBackend;
 
 impl PlatformBackend for FailClosedBackend {
+    fn arm_process_guard<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
+        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
+    }
+
+    fn verify_process_guard(
+        &mut self,
+        _expected_policy_digest: [u8; 32],
+    ) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
+    }
+
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async move { Err(PlatformError::GuardFailed(guard)) })
     }
@@ -91,6 +128,7 @@ pub struct FakeBackend {
     active_guards: u8,
     armed: Vec<GuardKind>,
     disarmed: Vec<GuardKind>,
+    process_policy_digest: Option<[u8; 32]>,
 }
 
 impl FakeBackend {
@@ -116,8 +154,9 @@ impl FakeBackend {
 
     /// Marks a guard as already active without recording a new arm operation.
     ///
-    /// This models a crash after the platform effect completed but before the next
-    /// protected-state write.
+    /// This models a crash after the platform effect completed but before the next protected-state
+    /// write. A prearmed process guard has no policy digest and therefore cannot pass typed process
+    /// verification until it is rearmed against a frozen plan.
     pub const fn prearm_guard(&mut self, guard: GuardKind) {
         self.active_guards |= guard.bit();
     }
@@ -140,13 +179,22 @@ impl FakeBackend {
         &self.disarmed
     }
 
+    /// Returns the frozen policy digest currently attached to the fake process guard.
+    #[must_use]
+    pub const fn process_policy_digest(&self) -> Option<[u8; 32]> {
+        self.process_policy_digest
+    }
+
     const fn should_fail(mask: u8, guard: GuardKind) -> bool {
         mask & guard.bit() != 0
     }
 }
 
 impl PlatformBackend for FakeBackend {
-    fn close_blocked_apps(&mut self) -> PlatformFuture<'_, ()> {
+    fn close_blocked_apps<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
         let should_fail = self.fail_close_blocked_apps;
         Box::pin(async move {
             if should_fail {
@@ -157,7 +205,49 @@ impl PlatformBackend for FakeBackend {
         })
     }
 
+    fn arm_process_guard<'a>(
+        &'a mut self,
+        plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
+        let guard = GuardKind::Process;
+        let should_fail = Self::should_fail(self.failing_guards, guard);
+        if !should_fail {
+            self.process_policy_digest = Some(plan.policy_digest());
+            if !self.guard_is_armed(guard) {
+                self.active_guards |= guard.bit();
+                self.armed.push(guard);
+            }
+        }
+        Box::pin(async move {
+            if should_fail {
+                Err(PlatformError::GuardFailed(guard))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn verify_process_guard(
+        &mut self,
+        expected_policy_digest: [u8; 32],
+    ) -> PlatformFuture<'_, ()> {
+        let guard = GuardKind::Process;
+        let should_fail = Self::should_fail(self.failing_verifications, guard)
+            || !self.guard_is_armed(guard)
+            || self.process_policy_digest != Some(expected_policy_digest);
+        Box::pin(async move {
+            if should_fail {
+                Err(PlatformError::GuardFailed(guard))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        if guard == GuardKind::Process {
+            return Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) });
+        }
         let should_fail = Self::should_fail(self.failing_guards, guard);
         if !should_fail && !self.guard_is_armed(guard) {
             self.active_guards |= guard.bit();
@@ -173,6 +263,9 @@ impl PlatformBackend for FakeBackend {
     }
 
     fn verify_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        if guard == GuardKind::Process {
+            return Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) });
+        }
         let should_fail =
             Self::should_fail(self.failing_verifications, guard) || !self.guard_is_armed(guard);
         Box::pin(async move {
@@ -189,6 +282,9 @@ impl PlatformBackend for FakeBackend {
         self.disarmed.push(guard);
         if !should_fail {
             self.active_guards &= !guard.bit();
+            if guard == GuardKind::Process {
+                self.process_policy_digest = None;
+            }
         }
         Box::pin(async move {
             if should_fail {
