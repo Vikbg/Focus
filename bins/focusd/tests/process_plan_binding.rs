@@ -54,13 +54,8 @@ fn stored_session(id: u128, state: SessionState) -> StoredActiveSession {
 }
 
 fn legacy_session(id: u128, state: SessionState) -> StoredActiveSession {
-    let snapshot = SessionPolicySnapshot::restore(
-        ProfileId(17),
-        PolicyVersion(8),
-        1,
-        &[0],
-    )
-    .unwrap();
+    let snapshot =
+        SessionPolicySnapshot::restore(ProfileId(17), PolicyVersion(8), 1, &[0]).unwrap();
     assert!(snapshot.process_enforcement_plan().is_none());
     StoredActiveSession::new(
         SessionId(id),
@@ -108,10 +103,7 @@ impl PlatformBackend for RecordingBackend {
         Box::pin(async { Ok(()) })
     }
 
-    fn verify_process_guard(
-        &mut self,
-        expected_policy_digest: [u8; 32],
-    ) -> PlatformFuture<'_, ()> {
+    fn verify_process_guard(&mut self, expected_policy_digest: [u8; 32]) -> PlatformFuture<'_, ()> {
         self.process_verified_with = Some(expected_policy_digest);
         Box::pin(async { Ok(()) })
     }
@@ -185,7 +177,12 @@ fn legacy_locked_session_recovers_to_protection_failure_instead_of_locked() {
     let persisted = store.active_session().unwrap().unwrap();
     assert_eq!(persisted.policy_snapshot().schema_version(), 1);
     assert_eq!(persisted.policy_sha256(), session.policy_sha256());
-    assert!(persisted.policy_snapshot().process_enforcement_plan().is_none());
+    assert!(
+        persisted
+            .policy_snapshot()
+            .process_enforcement_plan()
+            .is_none()
+    );
     let mut backend = RecordingBackend::default();
 
     let state = block_on_ready(recover_session(&mut store, &mut backend)).unwrap();
