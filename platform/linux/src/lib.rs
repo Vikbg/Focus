@@ -1,10 +1,12 @@
 //! Linux-specific Focus enforcement backend.
 
 mod backend;
+mod executable_identity;
 mod preflight;
 mod systemd;
 
 pub use backend::LinuxBackend;
+pub use executable_identity::{ExecutableIdentityError, observe_executable};
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
