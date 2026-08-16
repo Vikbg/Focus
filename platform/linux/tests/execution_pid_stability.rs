@@ -59,9 +59,11 @@ impl LinuxExecutionFactSource for Source {
 }
 
 fn stat(pid: u32, starttime: u64) -> String {
-    format!(
-        "{pid} (tool with spaces) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 {starttime} 21 22\n"
-    )
+    let fields = (4_u8..=21)
+        .map(|field| field.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{pid} (tool with spaces) S {fields} {starttime} 23 24\n")
 }
 
 fn executable() -> PathBuf {
