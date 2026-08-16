@@ -1,6 +1,6 @@
 use std::{fs::File, io, os::fd::AsFd};
 
-use focus_core::{ExecutionOrigin, ObservedExecutable};
+use focus_core::ExecutionOrigin;
 
 use crate::{
     ExecutionAttempt, ExecutionContextClassifier, ExecutionPermission, ExecutionPermissionChannel,
