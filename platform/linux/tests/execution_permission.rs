@@ -10,7 +10,9 @@ const ALLOWED_DIGEST: [u8; 32] = [0x52; 32];
 fn plan() -> ProcessEnforcementPlan {
     ProcessEnforcementPlan::strict(
         POLICY_DIGEST,
-        vec![ProcessRule::block(ExecutableMatcher::Digest(BLOCKED_DIGEST))],
+        vec![ProcessRule::block(ExecutableMatcher::Digest(
+            BLOCKED_DIGEST,
+        ))],
         vec!["/home/student/code".to_owned()],
     )
 }
@@ -38,10 +40,7 @@ fn stable_executable_inside_trusted_workspace_is_allowed() {
     assert_eq!(
         decide_execution_permission(
             &plan(),
-            &observed(
-                "/home/student/code/target/debug/tool",
-                Some(ALLOWED_DIGEST)
-            )
+            &observed("/home/student/code/target/debug/tool", Some(ALLOWED_DIGEST))
         ),
         ExecutionPermission::Allow
     );
