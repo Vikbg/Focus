@@ -85,8 +85,15 @@ fn healthy_preflight_does_not_claim_unimplemented_guards_are_armed() {
     let mut backend = LinuxBackend::with_probe(Probe::healthy());
 
     assert_eq!(block_on_ready(backend.preflight()), Ok(()));
-    assert_eq!(
-        block_on_ready(backend.arm_guard(GuardKind::Process)),
-        Err(PlatformError::GuardFailed(GuardKind::Process))
-    );
+    for guard in [
+        GuardKind::Process,
+        GuardKind::Network,
+        GuardKind::Browser,
+        GuardKind::Privilege,
+    ] {
+        assert_eq!(
+            block_on_ready(backend.arm_guard(guard)),
+            Err(PlatformError::GuardFailed(guard))
+        );
+    }
 }
