@@ -92,7 +92,7 @@ fn requester_context_enriches_but_never_replaces_target_identity() {
     )
     .unwrap();
 
-    assert_eq!(observed.path(), "/opt/focus/fd-target");
+    assert_eq!(observed.canonical_path(), "/opt/focus/fd-target");
     assert_eq!(observed.filesystem_identity(), Some((8, 501)));
     assert_eq!(observed.digest(), Some(TARGET_DIGEST));
     assert_eq!(observed.origin(), ExecutionOrigin::Flatpak);
