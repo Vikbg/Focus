@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io,
     os::unix::{
         fs::symlink,
         net::{UnixListener, UnixStream},
@@ -91,9 +92,11 @@ fn second_daemon_cannot_replace_a_live_socket() {
     let first = UnixListener::bind(&socket).unwrap();
     let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
 
-    let second = bind_production_socket(&socket, &policy);
+    let error = bind_production_socket(&socket, &policy)
+        .err()
+        .expect("second daemon replaced a live socket");
 
-    assert!(second.is_err(), "second daemon replaced a live socket");
+    assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
     let client = UnixStream::connect(&socket).unwrap();
     let (server, _) = first.accept().unwrap();
     drop(client);
@@ -125,9 +128,11 @@ fn production_bind_never_removes_an_existing_regular_file() {
     let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
     fs::write(&socket, b"protected sentinel").unwrap();
 
-    let result = bind_production_socket(&socket, &policy);
+    let error = bind_production_socket(&socket, &policy)
+        .err()
+        .expect("production bind replaced a regular file");
 
-    assert!(result.is_err());
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
     assert_eq!(fs::read(&socket).unwrap(), b"protected sentinel");
     let _ = fs::remove_file(socket);
 }
