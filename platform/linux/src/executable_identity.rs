@@ -26,8 +26,12 @@ impl fmt::Display for ExecutableIdentityError {
         match self {
             Self::Io(error) => write!(formatter, "executable identity I/O error: {error}"),
             Self::NonUtf8Path => formatter.write_str("canonical executable path is not UTF-8"),
-            Self::NotRegularFile => formatter.write_str("executable identity target is not a regular file"),
-            Self::NotExecutable => formatter.write_str("executable identity target has no execute bit"),
+            Self::NotRegularFile => {
+                formatter.write_str("executable identity target is not a regular file")
+            }
+            Self::NotExecutable => {
+                formatter.write_str("executable identity target has no execute bit")
+            }
         }
     }
 }
