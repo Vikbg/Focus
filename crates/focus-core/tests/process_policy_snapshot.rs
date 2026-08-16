@@ -13,7 +13,9 @@ fn profile(blocked_digest: [u8; 32], workspace: &str) -> Profile {
         PolicySet::new(Decision::Allow),
     )
     .with_process_policy(ProcessPolicy::strict(
-        vec![ProcessRule::block(ExecutableMatcher::Digest(blocked_digest))],
+        vec![ProcessRule::block(ExecutableMatcher::Digest(
+            blocked_digest,
+        ))],
         vec![workspace.to_owned()],
     ))
 }
