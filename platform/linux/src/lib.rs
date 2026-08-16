@@ -5,6 +5,7 @@ mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
 mod preflight;
+mod process_closer;
 mod systemd;
 
 pub use backend::LinuxBackend;
@@ -20,6 +21,10 @@ pub use execution_fact_collector::{
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
+};
+pub use process_closer::{
+    ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
+    close_blocked_processes,
 };
 
 use std::{
