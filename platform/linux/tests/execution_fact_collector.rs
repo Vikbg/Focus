@@ -11,7 +11,6 @@ use focus_linux::{
     ExecutionContextClassifier, LinuxExecutionFactSource, collect_execution_observation,
 };
 
-const IDE_DIGEST: [u8; 32] = [0x73; 32];
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 fn fixture_dir() -> PathBuf {
@@ -29,6 +28,15 @@ fn executable(dir: &Path, name: &str, contents: &[u8]) -> PathBuf {
     fs::write(&path, contents).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     path
+}
+
+fn stat(pid: u32) -> String {
+    let fields = (4_u8..=21)
+        .map(|field| field.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let starttime = 10_000_u64 + u64::from(pid);
+    format!("{pid} (test) S {fields} {starttime} 23 24\n")
 }
 
 #[derive(Debug, Default)]
@@ -101,6 +109,14 @@ impl LinuxExecutionFactSource for Source {
             .get(&pid)
             .cloned()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "missing status"))
+    }
+
+    fn stat_text(&self, pid: u32) -> io::Result<String> {
+        if self.executables.contains_key(&pid) {
+            Ok(stat(pid))
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotFound, "missing stat"))
+        }
     }
 
     fn flatpak_info(&self, pid: u32) -> io::Result<Option<String>> {
