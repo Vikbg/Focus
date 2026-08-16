@@ -89,7 +89,7 @@ pub fn observe_executable(
 
 fn hash_open_file(file: &mut File) -> io::Result<[u8; 32]> {
     let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; HASH_BUFFER_BYTES];
+    let mut buffer = vec![0_u8; HASH_BUFFER_BYTES].into_boxed_slice();
     loop {
         let read = file.read(&mut buffer)?;
         if read == 0 {
