@@ -184,7 +184,10 @@ fn process_disarm_routes_to_the_typed_guard_controller() {
         Ok(())
     );
 
-    assert_eq!(block_on_ready(backend.disarm_guard(GuardKind::Process)), Ok(()));
+    assert_eq!(
+        block_on_ready(backend.disarm_guard(GuardKind::Process)),
+        Ok(())
+    );
     assert_eq!(backend.process_guard().armed_digest, None);
     assert_eq!(backend.process_guard().disarm_calls, 1);
 }
