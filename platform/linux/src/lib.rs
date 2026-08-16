@@ -3,6 +3,7 @@
 mod backend;
 mod executable_identity;
 mod execution_context;
+mod execution_fact_collector;
 mod preflight;
 mod systemd;
 
@@ -11,6 +12,10 @@ pub use executable_identity::{ExecutableIdentityError, observe_executable};
 pub use execution_context::{
     ExecutionContextClassifier, ExecutionContextError, LinuxExecutionFacts,
     enrich_execution_context,
+};
+pub use execution_fact_collector::{
+    ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
+    collect_execution_observation,
 };
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
