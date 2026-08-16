@@ -708,23 +708,23 @@ pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Re
             use std::os::unix::fs::FileTypeExt;
 
             if !metadata.file_type().is_socket() {
-  return Err(io::Error::new(
-      io::ErrorKind::AlreadyExists,
-      "refusing to replace a non-socket IPC path",
-  ));
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "refusing to replace a non-socket IPC path",
+                ));
             }
 
             match UnixStream::connect(socket_path) {
-  Ok(_) => {
-      return Err(io::Error::new(
-          io::ErrorKind::AddrInUse,
-          "Focus daemon socket is already active",
-      ));
-  }
-  Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-      fs::remove_file(socket_path)?;
-  }
-  Err(error) => return Err(error),
+                Ok(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::AddrInUse,
+                        "Focus daemon socket is already active",
+                    ));
+                }
+                Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+                    fs::remove_file(socket_path)?;
+                }
+                Err(error) => return Err(error),
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}

@@ -143,7 +143,12 @@ fn production_bind_never_removes_or_follows_an_existing_symlink() {
     let result = bind_production_socket(&socket, &policy);
 
     assert!(result.is_err());
-    assert!(fs::symlink_metadata(&socket).unwrap().file_type().is_symlink());
+    assert!(
+        fs::symlink_metadata(&socket)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(fs::read(&target).unwrap(), b"protected target");
     let _ = fs::remove_file(socket);
     let _ = fs::remove_file(target);

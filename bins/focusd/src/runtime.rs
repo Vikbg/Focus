@@ -118,6 +118,48 @@ fn snapshot_state(snapshot: &Arc<RwLock<DaemonSnapshot>>) -> crate::DaemonState 
         .state()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SocketIdentity {
+    device: u64,
+    inode: u64,
+}
+
+impl SocketIdentity {
+    fn capture(path: &Path) -> io::Result<Self> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_socket() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bound IPC path is not a Unix socket",
+            ));
+        }
+        Ok(Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+
+    fn remove_if_unchanged(self, path: &Path) -> io::Result<()> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+
+        if metadata.file_type().is_socket()
+            && metadata.dev() == self.device
+            && metadata.ino() == self.inode
+        {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+}
+
 async fn serve_connection<S, B>(
     stream: UnixStream,
     service: Arc<Mutex<DaemonService<S, B>>>,
@@ -238,6 +280,7 @@ where
         F: Future<Output = ()>,
     {
         let listener = bind_production_socket(socket_path, policy)?;
+        let socket_identity = SocketIdentity::capture(socket_path)?;
         listener.set_nonblocking(true)?;
         let listener = UnixListener::from_std(listener)?;
         let mut connections = JoinSet::new();
@@ -263,7 +306,7 @@ where
 
         drop(listener);
         while connections.join_next().await.is_some() {}
-        let _ = fs::remove_file(socket_path);
+        socket_identity.remove_if_unchanged(socket_path)?;
         Ok(())
     }
 }
