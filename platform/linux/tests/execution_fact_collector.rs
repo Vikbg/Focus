@@ -50,7 +50,13 @@ struct Source {
 }
 
 impl Source {
-    fn with_process(mut self, pid: u32, executable: PathBuf, argv: &[&str], ppid: u32) -> Self {
+    fn with_process(
+        mut self,
+        pid: u32,
+        executable: PathBuf,
+        argv: &[&str],
+        parent_pid: u32,
+    ) -> Self {
         self.executables.insert(pid, executable);
         let mut cmdline = argv.join("\0").into_bytes();
         cmdline.push(0);
@@ -61,7 +67,7 @@ impl Source {
         );
         self.statuses.insert(
             pid,
-            format!("Name:\ttest\nState:\tS (sleeping)\nPPid:\t{ppid}\n"),
+            format!("Name:\ttest\nState:\tS (sleeping)\nPPid:\t{parent_pid}\n"),
         );
         self
     }
