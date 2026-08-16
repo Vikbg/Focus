@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -16,13 +17,18 @@ use focus_storage::{FocusStore, MutationReservation, SqliteStore, StoredActiveSe
 use focusd::DaemonService;
 
 const CODE: &str = "FG7K-P29M-4TXQ-R8VN";
+static NEXT_TEMP_DATABASE_ID: AtomicU64 = AtomicU64::new(0);
 
 fn temp_database() -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("focus-service-replay-{nonce}.db"))
+    let sequence = NEXT_TEMP_DATABASE_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "focus-service-replay-{}-{nonce}-{sequence}.db",
+        std::process::id()
+    ))
 }
 
 fn locked_session() -> StoredActiveSession {

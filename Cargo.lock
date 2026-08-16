@@ -140,6 +140,7 @@ name = "focus-linux"
 version = "0.0.0"
 dependencies = [
  "focus-core",
+ "focus-platform",
  "nix",
 ]
 

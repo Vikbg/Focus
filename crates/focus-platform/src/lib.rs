@@ -25,6 +25,7 @@ impl GuardKind {
 /// Error returned by an operating-system enforcement backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformError {
+    PreflightFailed,
     GuardFailed(GuardKind),
     CloseBlockedAppsFailed,
 }

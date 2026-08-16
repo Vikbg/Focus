@@ -13,6 +13,7 @@ on:
       - "crates/**"
       - "bins/**"
       - "platform/**"
+      - "tests/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -35,6 +36,12 @@ jobs:
 
       - name: Check CI reproducibility policy
         run: python3 scripts/check-ci-reproducibility.py
+
+      - name: Validate disposable Linux VM harness
+        run: |
+          bash -n tests/vm/run-qemu.sh
+          bash -n tests/vm/guest-runner.sh
+          python3 tests/vm/check_harness.py
 
       - name: Install Rust stable
         run: |

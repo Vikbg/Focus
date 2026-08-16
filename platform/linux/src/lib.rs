@@ -1,5 +1,15 @@
 //! Linux-specific Focus enforcement backend.
 
+mod backend;
+mod preflight;
+mod systemd;
+
+pub use backend::LinuxBackend;
+pub use preflight::{
+    Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
+    preflight, require_strict_preflight,
+};
+
 use std::{
     error::Error,
     fmt, fs, io,
