@@ -237,8 +237,7 @@ fn is_wine_loader(path: &str) -> bool {
 fn is_interpreter(path: &str) -> bool {
     matches!(
         file_name(path),
-        "sh"
-            | "bash"
+        "sh" | "bash"
             | "dash"
             | "zsh"
             | "fish"
@@ -254,7 +253,10 @@ fn is_interpreter(path: &str) -> bool {
 
 fn is_cron_parent(parent: &ObservedExecutable) -> bool {
     parent.filesystem_identity().is_some()
-        && matches!(parent.canonical_path(), "/usr/sbin/cron" | "/usr/sbin/crond")
+        && matches!(
+            parent.canonical_path(),
+            "/usr/sbin/cron" | "/usr/sbin/crond"
+        )
 }
 
 fn is_user_systemd_cgroup(cgroup: &str) -> bool {

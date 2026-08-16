@@ -2,7 +2,8 @@ use focus_core::{
     ExecutableMatcher, ExecutionOrigin, ObservedExecutable, PackageIdentity, PackageKind,
 };
 use focus_linux::{
-    ExecutionContextClassifier, ExecutionContextError, LinuxExecutionFacts, enrich_execution_context,
+    ExecutionContextClassifier, ExecutionContextError, LinuxExecutionFacts,
+    enrich_execution_context,
 };
 
 const EXECUTABLE_DIGEST: [u8; 32] = [0x11; 32];
@@ -65,7 +66,13 @@ fn appimage_digest_is_used_instead_of_mutable_image_path_as_package_id() {
 
     assert_eq!(observed.origin(), ExecutionOrigin::AppImage);
     assert_eq!(observed.package().unwrap().kind(), PackageKind::AppImage);
-    assert!(!observed.package().unwrap().id().contains("renamed.AppImage"));
+    assert!(
+        !observed
+            .package()
+            .unwrap()
+            .id()
+            .contains("renamed.AppImage")
+    );
 }
 
 #[test]
@@ -99,7 +106,8 @@ fn known_interpreter_with_script_argument_is_classified_as_interpreter() {
 fn stable_ide_parent_identity_classifies_child_without_trusting_parent_name() {
     let parent = executable("/opt/editor/renamed-launcher", IDE_DIGEST);
     let base = executable("/home/student/code/target/debug/app", EXECUTABLE_DIGEST);
-    let facts = LinuxExecutionFacts::new(vec![base.canonical_path().to_owned()]).with_parent(parent);
+    let facts =
+        LinuxExecutionFacts::new(vec![base.canonical_path().to_owned()]).with_parent(parent);
 
     let observed = enrich_execution_context(base, &facts, &classifier()).unwrap();
 
