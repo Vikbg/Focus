@@ -4,6 +4,7 @@ mod backend;
 mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
+mod linux_process_control;
 mod preflight;
 mod process_closer;
 mod systemd;
@@ -16,7 +17,10 @@ pub use execution_context::{
 };
 pub use execution_fact_collector::{
     ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
-    collect_execution_observation,
+    collect_execution_observation, collect_running_process,
+};
+pub use linux_process_control::{
+    LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
 };
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
