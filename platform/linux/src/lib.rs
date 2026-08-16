@@ -7,6 +7,7 @@ mod execution_fact_collector;
 mod execution_permission;
 mod fanotify_execution_channel;
 mod linux_process_control;
+mod nix_fanotify;
 mod preflight;
 mod process_closer;
 mod rustix_pidfd;
@@ -35,6 +36,7 @@ pub use fanotify_execution_channel::{
 pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
 };
+pub use nix_fanotify::NixFanotifyPermissionSource;
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
