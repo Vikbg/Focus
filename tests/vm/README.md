@@ -11,6 +11,7 @@ Use a prepared x86_64 qcow2 cloud image with:
 - cgroup v2
 - fanotify support
 - nftables
+- virtio-9p guest filesystem support
 - Rust stable and Cargo for the daemon-restart fixture
 
 The host needs `qemu-system-x86_64`, `qemu-img`, `cloud-localds`, Python 3, and `timeout`.
@@ -33,7 +34,7 @@ bash tests/vm/run-qemu.sh multi-user
 
 ## Safety properties
 
-`run-qemu.sh` never installs or arms Focus enforcement on the host. It creates a temporary qcow2 overlay, mounts the repository read-only into the guest, and deletes the overlay when QEMU exits.
+`run-qemu.sh` never installs or arms Focus enforcement on the host. It creates a temporary qcow2 overlay, exports the repository to the guest through a read-only virtio-9p share, and deletes the overlay when QEMU exits.
 
 `guest-runner.sh` refuses to perform any privileged fixture unless `systemd-detect-virt --vm` confirms that it is running in a virtual machine. Root-only operations such as reboot, suspend, user creation, nftables probing, and daemon restart happen only inside that disposable guest.
 
