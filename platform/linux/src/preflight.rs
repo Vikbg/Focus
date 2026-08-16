@@ -3,7 +3,6 @@ use std::{
     fmt, fs, io,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::Path,
-    process::{Command, Stdio},
 };
 
 use crate::systemd;
@@ -13,6 +12,9 @@ const FANOTIFY_LIMIT: &str = "/proc/sys/fs/fanotify/max_queued_events";
 const PROC_SELF_STATUS: &str = "/proc/self/status";
 const FOCUS_RUNTIME_DIR: &str = "/run/focus";
 const RUNTIME_PARENT: &str = "/run";
+const FOCUS_STATE_DIR: &str = "/var/lib/focus";
+const STATE_PARENT: &str = "/var/lib";
+const NFT_BINARY_CANDIDATES: [&str; 2] = ["/usr/sbin/nft", "/usr/bin/nft"];
 
 /// Health of one Linux preflight capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,14 +145,14 @@ pub trait SystemProbe {
     /// Returns an error when the probe cannot determine the state safely.
     fn fanotify_available(&self) -> Result<bool, LinuxError>;
 
-    /// Reports whether the nftables userspace command is available.
+    /// Reports whether a trusted root-owned nftables binary is installed at a fixed system path.
     ///
     /// # Errors
     ///
-    /// Returns an error when command discovery fails unexpectedly.
+    /// Returns an error when candidate binary metadata cannot be inspected safely.
     fn nftables_available(&self) -> Result<bool, LinuxError>;
 
-    /// Reports whether the protected runtime path can be created with the expected ownership model.
+    /// Reports whether protected runtime and state paths have a safe ownership model.
     ///
     /// # Errors
     ///
@@ -190,38 +192,36 @@ impl SystemProbe for HostSystemProbe {
     }
 
     fn nftables_available(&self) -> Result<bool, LinuxError> {
-        match Command::new("nft")
-            .arg("--version")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-        {
-            Ok(status) => Ok(status.success()),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(source) => Err(LinuxError::Probe {
-                capability: "nftables",
-                source,
-            }),
+        for candidate in NFT_BINARY_CANDIDATES {
+            let metadata = match fs::metadata(candidate) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(source) => {
+                    return Err(LinuxError::Probe {
+                        capability: "nftables",
+                        source,
+                    });
+                }
+            };
+            if trusted_root_executable_metadata(
+                metadata.is_file(),
+                metadata.uid(),
+                metadata.permissions().mode(),
+            ) {
+                return Ok(true);
+            }
         }
+        Ok(false)
     }
 
     fn filesystem_permissions_ready(&self) -> Result<bool, LinuxError> {
-        let path = if Path::new(FOCUS_RUNTIME_DIR).exists() {
-            Path::new(FOCUS_RUNTIME_DIR)
-        } else {
-            Path::new(RUNTIME_PARENT)
-        };
-        let metadata = fs::symlink_metadata(path).map_err(|source| LinuxError::Probe {
-            capability: "filesystem_permissions",
-            source,
-        })?;
-        let mode = metadata.permissions().mode();
-        let secure_type = metadata.file_type().is_dir() && !metadata.file_type().is_symlink();
-        let root_owned = metadata.uid() == 0;
-        let owner_writable = mode & 0o200 != 0;
-        let unsafe_world_write = mode & 0o002 != 0;
-        Ok(secure_type && root_owned && owner_writable && !unsafe_world_write)
+        Ok(protected_directory_ready(
+            Path::new(FOCUS_RUNTIME_DIR),
+            Path::new(RUNTIME_PARENT),
+        )? && protected_directory_ready(
+            Path::new(FOCUS_STATE_DIR),
+            Path::new(STATE_PARENT),
+        )?)
     }
 
     fn privilege_model_ready(&self) -> Result<bool, LinuxError> {
@@ -248,6 +248,38 @@ impl SystemProbe for HostSystemProbe {
             source,
         })
     }
+}
+
+const fn trusted_root_executable_metadata(is_file: bool, uid: u32, mode: u32) -> bool {
+    is_file && uid == 0 && mode & 0o111 != 0 && mode & 0o022 == 0
+}
+
+const fn protected_directory_metadata(is_dir: bool, is_symlink: bool, uid: u32, mode: u32) -> bool {
+    is_dir && !is_symlink && uid == 0 && mode & 0o200 != 0 && mode & 0o022 == 0
+}
+
+fn protected_directory_ready(path: &Path, parent: &Path) -> Result<bool, LinuxError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::symlink_metadata(parent)
+            .map_err(|source| LinuxError::Probe {
+                capability: "filesystem_permissions",
+                source,
+            })?,
+        Err(source) => {
+            return Err(LinuxError::Probe {
+                capability: "filesystem_permissions",
+                source,
+            });
+        }
+    };
+
+    Ok(protected_directory_metadata(
+        metadata.file_type().is_dir(),
+        metadata.file_type().is_symlink(),
+        metadata.uid(),
+        metadata.permissions().mode(),
+    ))
 }
 
 const fn health(available: bool) -> Health {
@@ -304,4 +336,28 @@ pub fn require_strict_preflight(report: &LinuxPreflightReport) -> Result<(), Lin
 /// Returns an error when a host capability cannot be inspected safely.
 pub async fn preflight() -> Result<LinuxPreflightReport, LinuxError> {
     evaluate_preflight(&HostSystemProbe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{protected_directory_metadata, trusted_root_executable_metadata};
+
+    #[test]
+    fn trusted_executable_requires_root_ownership_and_non_writable_system_mode() {
+        assert!(trusted_root_executable_metadata(true, 0, 0o755));
+        assert!(!trusted_root_executable_metadata(true, 1000, 0o755));
+        assert!(!trusted_root_executable_metadata(true, 0, 0o775));
+        assert!(!trusted_root_executable_metadata(true, 0, 0o666));
+        assert!(!trusted_root_executable_metadata(false, 0, 0o755));
+    }
+
+    #[test]
+    fn protected_directory_rejects_group_or_world_write_and_symlinks() {
+        assert!(protected_directory_metadata(true, false, 0, 0o755));
+        assert!(!protected_directory_metadata(true, false, 0, 0o775));
+        assert!(!protected_directory_metadata(true, false, 0, 0o757));
+        assert!(!protected_directory_metadata(true, false, 1000, 0o755));
+        assert!(!protected_directory_metadata(true, true, 0, 0o755));
+        assert!(!protected_directory_metadata(false, false, 0, 0o755));
+    }
 }
