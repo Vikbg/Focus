@@ -10,6 +10,7 @@ mod linux_process_control;
 mod nix_fanotify;
 mod preflight;
 mod process_closer;
+mod process_guard;
 mod rustix_pidfd;
 mod systemd;
 
@@ -45,6 +46,7 @@ pub use process_closer::{
     ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
     close_blocked_processes,
 };
+pub use process_guard::{FailClosedProcessGuard, ProcessGuardControl, ProcessGuardError};
 pub use rustix_pidfd::RustixPidfdOps;
 
 use std::{
