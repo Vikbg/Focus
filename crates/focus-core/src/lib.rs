@@ -19,7 +19,7 @@ pub use emergency::{
 pub use policy::{DecisionContext, PolicyEngine, PolicySet};
 pub use process::{
     ExecutableMatcher, ExecutionOrigin, ObservedExecutable, PackageIdentity, PackageKind,
-    ProcessEnforcementPlan, ProcessRule,
+    ProcessEnforcementPlan, ProcessPolicy, ProcessRule,
 };
 pub use profile::{
     PolicyVersion, Profile, ProfileId, SESSION_POLICY_SCHEMA_VERSION, SessionPolicySnapshot,
