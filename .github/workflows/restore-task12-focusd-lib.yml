@@ -1,0 +1,60 @@
+name: Restore Task 12 focusd library
+
+on:
+  push:
+    branches:
+      - "agent/p2-process-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Restore last healthy daemon library
+        run: |
+          git fetch --depth=1 origin 4407ee885e137e1f3694f3144c060a0940802840
+          git show 4407ee885e137e1f3694f3144c060a0940802840:bins/focusd/src/lib.rs > bins/focusd/src/lib.rs
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("bins/focusd/src/lib.rs")
+          text = path.read_text(encoding="utf-8")
+          required = [
+              "LinuxEmergencyError",
+              "pub use service::DaemonService",
+              "SessionState::Preflight",
+              "MAX_FRAME_BYTES",
+              "ProcessEnforcementPlan",
+          ]
+          missing = [marker for marker in required if marker not in text]
+          if missing:
+              raise SystemExit(f"healthy lib marker missing: {missing}")
+
+          old = '''    async fn arm_process_guard(\n        &mut self,\n        plan: &ProcessEnforcementPlan,\n    ) -> Result<(), PlatformError> {\n'''
+          new = '''    /// Arms the process guard against a frozen enforcement plan and records it for compensation.\n    ///\n    /// # Errors\n    ///\n    /// Returns the platform error without adding Process to the applied ledger when arming fails.\n    pub async fn arm_process_guard(\n        &mut self,\n        plan: &ProcessEnforcementPlan,\n    ) -> Result<(), PlatformError> {\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one typed process arm method, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+      - name: Verify restored daemon library compiles
+        run: |
+          cargo fmt --all
+          cargo check --workspace --all-targets --locked
+          cargo test -p focusd --test arming_compensation --locked
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/restore-task12-focusd-lib.yml
+
+      - name: Commit verified restoration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bins/focusd/src/lib.rs bins/focusd/tests/arming_compensation.rs .github/workflows/restore-task12-focusd-lib.yml
+          git commit -m "fix: restore daemon library after Task 12 overwrite"
+          git push
