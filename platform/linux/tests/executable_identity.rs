@@ -95,6 +95,33 @@ fn copied_binary_changes_filesystem_identity_but_keeps_digest() {
 }
 
 #[test]
+fn content_change_on_same_inode_changes_digest() {
+    let dir = fixture_dir();
+    let executable = executable_fixture(&dir, "mutable");
+    let before = observe_executable(&executable, ExecutionOrigin::Direct).unwrap();
+
+    fs::write(&executable, b"#!/bin/sh\necho changed-contents\n").unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    let after = observe_executable(&executable, ExecutionOrigin::Direct).unwrap();
+
+    assert_eq!(before.filesystem_identity(), after.filesystem_identity());
+    assert_ne!(before.digest(), after.digest());
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn observation_preserves_execution_origin() {
+    let dir = fixture_dir();
+    let executable = executable_fixture(&dir, "cron-child");
+    let observed = observe_executable(&executable, ExecutionOrigin::Cron).unwrap();
+
+    assert_eq!(observed.origin(), ExecutionOrigin::Cron);
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn non_regular_or_non_executable_paths_are_rejected() {
     let dir = fixture_dir();
     let not_executable = dir.join("data");
