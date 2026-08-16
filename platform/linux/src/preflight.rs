@@ -215,13 +215,10 @@ impl SystemProbe for HostSystemProbe {
     }
 
     fn filesystem_permissions_ready(&self) -> Result<bool, LinuxError> {
-        Ok(protected_directory_ready(
-            Path::new(FOCUS_RUNTIME_DIR),
-            Path::new(RUNTIME_PARENT),
-        )? && protected_directory_ready(
-            Path::new(FOCUS_STATE_DIR),
-            Path::new(STATE_PARENT),
-        )?)
+        Ok(
+            protected_directory_ready(Path::new(FOCUS_RUNTIME_DIR), Path::new(RUNTIME_PARENT))?
+                && protected_directory_ready(Path::new(FOCUS_STATE_DIR), Path::new(STATE_PARENT))?,
+        )
     }
 
     fn privilege_model_ready(&self) -> Result<bool, LinuxError> {
