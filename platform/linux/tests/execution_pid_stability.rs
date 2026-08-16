@@ -4,12 +4,15 @@ use std::{
     fs, io,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use focus_linux::{
     ExecutionContextClassifier, ExecutionFactCollectionError, LinuxExecutionFactSource,
     collect_execution_observation,
 };
+
+static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 struct Source {
     executable: PathBuf,
@@ -67,7 +70,11 @@ fn stat(pid: u32, starttime: u64) -> String {
 }
 
 fn executable() -> PathBuf {
-    let path = std::env::temp_dir().join(format!("focus-pid-stability-{}", std::process::id()));
+    let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "focus-pid-stability-{}-{sequence}",
+        std::process::id()
+    ));
     fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     path
