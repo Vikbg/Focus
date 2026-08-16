@@ -1,0 +1,63 @@
+name: Wire Task 12 safe pidfd support
+
+on:
+  push:
+    branches:
+      - "agent/p2-process-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Export pidfd module
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("platform/linux/src/lib.rs")
+          text = path.read_text(encoding="utf-8")
+          old_modules = '''mod preflight;\nmod process_closer;\nmod systemd;\n'''
+          new_modules = '''mod preflight;\nmod process_closer;\nmod rustix_pidfd;\nmod systemd;\n'''
+          if text.count(old_modules) != 1:
+              raise SystemExit("unexpected Linux module list")
+          text = text.replace(old_modules, new_modules, 1)
+
+          old_exports = '''pub use process_closer::{\n    ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,\n    close_blocked_processes,\n};\n'''
+          new_exports = old_exports + '''pub use rustix_pidfd::RustixPidfdOps;\n'''
+          if text.count(old_exports) != 1:
+              raise SystemExit("unexpected process closer exports")
+          text = text.replace(old_exports, new_exports, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Resolve lockfile
+        run: cargo metadata --format-version 1 > /dev/null
+
+      - name: Verify pidfd support
+        run: |
+          cargo fmt --all
+          cargo test -p focus-linux --test rustix_pidfd --locked
+          cargo clippy -p focus-linux --all-targets --locked -- -D warnings
+          python3 scripts/check-no-em-dash.py
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/wire-task12-rustix-pidfd.yml
+
+      - name: Commit verified pidfd wiring
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock platform/linux/src/lib.rs platform/linux/src/rustix_pidfd.rs platform/linux/Cargo.toml .github/workflows/wire-task12-rustix-pidfd.yml
+          git commit -m "feat(linux): wire safe pidfd process handles"
+          git push
