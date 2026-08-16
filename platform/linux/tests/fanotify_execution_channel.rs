@@ -5,12 +5,13 @@ use std::{
     io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
-use focus_core::{
-    ExecutableMatcher, ExecutionOrigin, ProcessEnforcementPlan, ProcessRule,
-};
+use focus_core::{ExecutableMatcher, ExecutionOrigin, ProcessEnforcementPlan, ProcessRule};
 use focus_linux::{
     ExecutionContextClassifier, ExecutionPermission, ExecutionPermissionChannel,
     ExecutionPermissionStep, FanotifyChannelHealth, FanotifyExecutionChannel,
@@ -172,11 +173,8 @@ fn fd_target_is_classified_and_denied_through_permission_response() {
         vec![dir.to_string_lossy().into_owned()],
     );
     let (source, state) = Source::with_event(FanotifyExecutionEvent::new(file, 4242));
-    let mut channel = FanotifyExecutionChannel::new(
-        source,
-        Facts,
-        ExecutionContextClassifier::new(Vec::new()),
-    );
+    let mut channel =
+        FanotifyExecutionChannel::new(source, Facts, ExecutionContextClassifier::new(Vec::new()));
 
     let step = process_next_execution_permission(&mut channel, &plan).unwrap();
 
@@ -195,7 +193,11 @@ fn requester_context_failure_becomes_unclassifiable_and_is_denied() {
     let target = dir.join("target");
     executable(&target, b"target executable");
     let file = File::open(&target).unwrap();
-    let plan = ProcessEnforcementPlan::strict(POLICY_DIGEST, Vec::new(), vec![dir.to_string_lossy().into_owned()]);
+    let plan = ProcessEnforcementPlan::strict(
+        POLICY_DIGEST,
+        Vec::new(),
+        vec![dir.to_string_lossy().into_owned()],
+    );
     let (source, state) = Source::with_event(FanotifyExecutionEvent::new(file, 4242));
     let mut channel = FanotifyExecutionChannel::new(
         source,
@@ -223,11 +225,8 @@ fn fanotify_read_failure_marks_channel_unhealthy() {
         fail_read: true,
         fail_response: false,
     };
-    let mut channel = FanotifyExecutionChannel::new(
-        source,
-        Facts,
-        ExecutionContextClassifier::new(Vec::new()),
-    );
+    let mut channel =
+        FanotifyExecutionChannel::new(source, Facts, ExecutionContextClassifier::new(Vec::new()));
 
     assert!(ExecutionPermissionChannel::next_attempt(&mut channel).is_err());
     assert_eq!(channel.health(), FanotifyChannelHealth::Failed);
@@ -241,13 +240,14 @@ fn fanotify_response_failure_marks_channel_unhealthy() {
     let file = File::open(&target).unwrap();
     let (mut source, _) = Source::with_event(FanotifyExecutionEvent::new(file, 4242));
     source.fail_response = true;
-    let mut channel = FanotifyExecutionChannel::new(
-        source,
-        Facts,
-        ExecutionContextClassifier::new(Vec::new()),
-    );
+    let mut channel =
+        FanotifyExecutionChannel::new(source, Facts, ExecutionContextClassifier::new(Vec::new()));
 
-    assert!(ExecutionPermissionChannel::next_attempt(&mut channel).unwrap().is_some());
+    assert!(
+        ExecutionPermissionChannel::next_attempt(&mut channel)
+            .unwrap()
+            .is_some()
+    );
     assert!(ExecutionPermissionChannel::respond(&mut channel, ExecutionPermission::Deny).is_err());
     assert_eq!(channel.health(), FanotifyChannelHealth::Failed);
     fs::remove_dir_all(dir).unwrap();
