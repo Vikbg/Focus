@@ -2,8 +2,11 @@ use std::{
     error::Error,
     fmt,
     fs::{self, File},
-    io::{self, Read},
-    os::unix::fs::{MetadataExt, PermissionsExt},
+    io,
+    os::{
+        fd::{AsRawFd, BorrowedFd},
+        unix::fs::{FileExt, MetadataExt, PermissionsExt},
+    },
     path::Path,
 };
 
@@ -71,7 +74,41 @@ pub fn observe_executable(
         .ok_or(ExecutableIdentityError::NonUtf8Path)?
         .to_owned();
 
-    let mut file = File::open(&canonical)?;
+    let file = File::open(&canonical)?;
+    observe_file(file, canonical_path, origin)
+}
+
+/// Collects executable identity from an already-open kernel file descriptor.
+///
+/// The file descriptor is cloned and all metadata and digest reads stay bound to that opened file
+/// description. The path is resolved through `/proc/self/fd` only to provide path context; it is
+/// never reopened to choose which bytes are hashed.
+///
+/// # Errors
+///
+/// Returns an error if the descriptor cannot be cloned or resolved through procfs, the resolved
+/// path is not UTF-8, the target is not a regular executable file, or its bytes cannot be hashed.
+pub fn observe_open_executable(
+    fd: BorrowedFd<'_>,
+    origin: ExecutionOrigin,
+) -> Result<ObservedExecutable, ExecutableIdentityError> {
+    let owned = fd.try_clone_to_owned()?;
+    let file = File::from(owned);
+    let proc_fd_path = format!("/proc/self/fd/{}", file.as_raw_fd());
+    let canonical = fs::canonicalize(proc_fd_path)?;
+    let canonical_path = canonical
+        .to_str()
+        .ok_or(ExecutableIdentityError::NonUtf8Path)?
+        .to_owned();
+
+    observe_file(file, canonical_path, origin)
+}
+
+fn observe_file(
+    file: File,
+    canonical_path: String,
+    origin: ExecutionOrigin,
+) -> Result<ObservedExecutable, ExecutableIdentityError> {
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(ExecutableIdentityError::NotRegularFile);
@@ -80,22 +117,26 @@ pub fn observe_executable(
         return Err(ExecutableIdentityError::NotExecutable);
     }
 
-    let digest = hash_open_file(&mut file)?;
+    let digest = hash_open_file(&file)?;
     Ok(ObservedExecutable::new(canonical_path)
         .with_filesystem_identity(metadata.dev(), metadata.ino())
         .with_digest(digest)
         .with_origin(origin))
 }
 
-fn hash_open_file(file: &mut File) -> io::Result<[u8; 32]> {
+fn hash_open_file(file: &File) -> io::Result<[u8; 32]> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; HASH_BUFFER_BYTES].into_boxed_slice();
+    let mut offset = 0_u64;
     loop {
-        let read = file.read(&mut buffer)?;
+        let read = file.read_at(&mut buffer, offset)?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
+        offset = offset
+            .checked_add(read as u64)
+            .ok_or_else(|| io::Error::other("executable size overflow while hashing"))?;
     }
     Ok(hasher.finalize().into())
 }
