@@ -29,6 +29,9 @@ required_host_markers = [
     "overlay.qcow2",
     "readonly=on",
     "cloud-localds",
+    'qemu_pid=""',
+    'kill "$qemu_pid"',
+    'wait "$qemu_pid"',
 ]
 for marker in required_host_markers:
     if marker not in host:
