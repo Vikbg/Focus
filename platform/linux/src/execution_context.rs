@@ -5,15 +5,18 @@ use focus_core::{
 };
 
 /// Read-only facts collected around one Linux execution attempt.
+///
+/// Package fields in this type are already verified facts produced by the Linux collector. This
+/// classifier never promotes process-controlled environment strings into stable package identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinuxExecutionFacts {
     argv: Vec<String>,
-    environment: Vec<(String, String)>,
     cgroup: Option<String>,
     parent: Option<ObservedExecutable>,
-    flatpak_app_id: Option<String>,
-    appimage_digest: Option<[u8; 32]>,
-    wine_target_digest: Option<[u8; 32]>,
+    verified_flatpak_app_id: Option<String>,
+    verified_snap_package_id: Option<String>,
+    verified_appimage_digest: Option<[u8; 32]>,
+    verified_wine_target_digest: Option<[u8; 32]>,
 }
 
 impl LinuxExecutionFacts {
@@ -22,20 +25,13 @@ impl LinuxExecutionFacts {
     pub const fn new(argv: Vec<String>) -> Self {
         Self {
             argv,
-            environment: Vec::new(),
             cgroup: None,
             parent: None,
-            flatpak_app_id: None,
-            appimage_digest: None,
-            wine_target_digest: None,
+            verified_flatpak_app_id: None,
+            verified_snap_package_id: None,
+            verified_appimage_digest: None,
+            verified_wine_target_digest: None,
         }
-    }
-
-    /// Adds one environment fact.
-    #[must_use]
-    pub fn with_environment(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.environment.push((key.into(), value.into()));
-        self
     }
 
     /// Adds the unified cgroup path for the process.
@@ -52,32 +48,32 @@ impl LinuxExecutionFacts {
         self
     }
 
-    /// Adds an application ID read from authoritative Flatpak process metadata.
+    /// Adds an application ID verified from authoritative Flatpak process metadata.
     #[must_use]
-    pub fn with_flatpak_app_id(mut self, app_id: impl Into<String>) -> Self {
-        self.flatpak_app_id = Some(app_id.into());
+    pub fn with_verified_flatpak_app_id(mut self, app_id: impl Into<String>) -> Self {
+        self.verified_flatpak_app_id = Some(app_id.into());
         self
     }
 
-    /// Adds the digest of the AppImage backing file after it has been observed safely.
+    /// Adds a Snap package ID verified from trusted Linux package metadata.
     #[must_use]
-    pub const fn with_appimage_digest(mut self, digest: [u8; 32]) -> Self {
-        self.appimage_digest = Some(digest);
+    pub fn with_verified_snap_package_id(mut self, package_id: impl Into<String>) -> Self {
+        self.verified_snap_package_id = Some(package_id.into());
         self
     }
 
-    /// Adds the digest of the Windows executable targeted by a Wine loader.
+    /// Adds the digest of an AppImage backing file verified by the Linux collector.
     #[must_use]
-    pub const fn with_wine_target_digest(mut self, digest: [u8; 32]) -> Self {
-        self.wine_target_digest = Some(digest);
+    pub const fn with_verified_appimage_digest(mut self, digest: [u8; 32]) -> Self {
+        self.verified_appimage_digest = Some(digest);
         self
     }
 
-    fn environment_value(&self, key: &str) -> Option<&str> {
-        self.environment
-            .iter()
-            .rev()
-            .find_map(|(candidate, value)| (candidate == key).then_some(value.as_str()))
+    /// Adds the digest of a Wine target executable verified by the Linux collector.
+    #[must_use]
+    pub const fn with_verified_wine_target_digest(mut self, digest: [u8; 32]) -> Self {
+        self.verified_wine_target_digest = Some(digest);
+        self
     }
 }
 
@@ -107,7 +103,6 @@ impl ExecutionContextClassifier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionContextError {
     AmbiguousPackageMarkers,
-    IncompleteAppImageMarker,
     InvalidWineMarker,
 }
 
@@ -115,43 +110,35 @@ impl fmt::Display for ExecutionContextError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AmbiguousPackageMarkers => {
-                formatter.write_str("conflicting Linux package execution markers")
+                formatter.write_str("conflicting verified Linux package execution markers")
             }
-            Self::IncompleteAppImageMarker => {
-                formatter.write_str("AppImage marker is missing a verified backing-file digest")
-            }
-            Self::InvalidWineMarker => {
-                formatter.write_str("Wine target digest was supplied for a non-Wine loader")
-            }
+            Self::InvalidWineMarker => formatter
+                .write_str("verified Wine target digest was supplied for a non-Wine loader"),
         }
     }
 }
 
 impl Error for ExecutionContextError {}
 
-/// Enriches a stable executable identity with Linux package, parent, and launch-context facts.
+/// Enriches a stable executable identity with verified Linux package, parent, and launch facts.
 ///
-/// Package markers use stable package IDs or verified backing-file digests. Conflicting strong
-/// package markers are rejected instead of being resolved by priority.
+/// Package markers use stable package IDs or verified backing-file digests supplied by the Linux
+/// collector. Conflicting verified package markers are rejected instead of being resolved by
+/// priority. Untrusted environment strings are not consulted by this classifier.
 ///
 /// # Errors
 ///
-/// Returns an error when strong package markers conflict, an AppImage marker lacks a verified
-/// digest, or a Wine target digest is attached to a process that is not a recognized Wine loader.
+/// Returns an error when verified package markers conflict or a verified Wine target digest is
+/// attached to a process that is not a recognized Wine loader.
 pub fn enrich_execution_context(
     mut executable: ObservedExecutable,
     facts: &LinuxExecutionFacts,
     classifier: &ExecutionContextClassifier,
 ) -> Result<ObservedExecutable, ExecutionContextError> {
-    let flatpak = non_empty(facts.flatpak_app_id.as_deref());
-    let snap = non_empty(facts.environment_value("SNAP_NAME"));
-    let appimage_path = non_empty(facts.environment_value("APPIMAGE"));
-    let appimage = match (appimage_path, facts.appimage_digest) {
-        (Some(_), Some(digest)) => Some(digest),
-        (Some(_), None) => return Err(ExecutionContextError::IncompleteAppImageMarker),
-        (None, _) => None,
-    };
-    let wine = if let Some(digest) = facts.wine_target_digest {
+    let flatpak = non_empty(facts.verified_flatpak_app_id.as_deref());
+    let snap = non_empty(facts.verified_snap_package_id.as_deref());
+    let appimage = facts.verified_appimage_digest;
+    let wine = if let Some(digest) = facts.verified_wine_target_digest {
         if !is_wine_loader(executable.canonical_path()) {
             return Err(ExecutionContextError::InvalidWineMarker);
         }
@@ -278,7 +265,7 @@ fn file_name(path: &str) -> &str {
 fn digest_identifier(digest: [u8; 32]) -> String {
     let mut output = String::with_capacity(64);
     for byte in digest {
-        let _ = write!(&mut output, "{byte:02x}");
+        write!(&mut output, "{byte:02x}").expect("writing to String cannot fail");
     }
     output
 }
