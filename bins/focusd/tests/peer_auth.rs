@@ -91,8 +91,8 @@ fn second_daemon_cannot_replace_a_live_socket() {
     let first = UnixListener::bind(&socket).unwrap();
     let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
 
-    let error = bind_production_socket(&socket, &policy)
-        .expect_err("second daemon replaced a live socket");
+    let error =
+        bind_production_socket(&socket, &policy).expect_err("second daemon replaced a live socket");
 
     assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
     let client = UnixStream::connect(&socket).unwrap();
