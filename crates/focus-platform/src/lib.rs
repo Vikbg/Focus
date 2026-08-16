@@ -55,18 +55,26 @@ pub trait PlatformBackend {
 
     /// Arms the process guard against the exact frozen process plan.
     ///
-    /// Implementations must be idempotent because crash recovery can reapply the same plan after
-    /// the platform side effect completed but before the following protected-state write.
+    /// The default is fail-closed. Implementations must opt in explicitly and must be idempotent
+    /// because crash recovery can reapply the same plan after the platform side effect completed
+    /// but before the following protected-state write.
     fn arm_process_guard<'a>(
         &'a mut self,
-        plan: &'a ProcessEnforcementPlan,
-    ) -> PlatformFuture<'a, ()>;
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
+        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
+    }
 
     /// Verifies that the process guard is healthy and enforcing the expected frozen policy digest.
+    ///
+    /// The default is fail-closed so a backend that has not implemented policy-bound process
+    /// verification can never make the daemon report `Locked`.
     fn verify_process_guard(
         &mut self,
-        expected_policy_digest: [u8; 32],
-    ) -> PlatformFuture<'_, ()>;
+        _expected_policy_digest: [u8; 32],
+    ) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
+    }
 
     /// Arms one non-process enforcement guard.
     ///
@@ -99,20 +107,6 @@ pub trait PlatformBackend {
 pub struct FailClosedBackend;
 
 impl PlatformBackend for FailClosedBackend {
-    fn arm_process_guard<'a>(
-        &'a mut self,
-        _plan: &'a ProcessEnforcementPlan,
-    ) -> PlatformFuture<'a, ()> {
-        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
-    }
-
-    fn verify_process_guard(
-        &mut self,
-        _expected_policy_digest: [u8; 32],
-    ) -> PlatformFuture<'_, ()> {
-        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
-    }
-
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async move { Err(PlatformError::GuardFailed(guard)) })
     }
