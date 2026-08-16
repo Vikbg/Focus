@@ -1,0 +1,167 @@
+name: Apply Task 12 target context refactor
+
+on:
+  push:
+    branches:
+      - "agent/p2-process-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Refactor requester context collection
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("platform/linux/src/execution_fact_collector.rs")
+          text = path.read_text()
+          start = text.index("pub fn collect_running_process<S: LinuxExecutionFactSource>(")
+          end = text.index("/// Collects only the executable observation", start)
+          replacement = r'''pub fn collect_running_process<S: LinuxExecutionFactSource>(
+              source: &S,
+              pid: u32,
+              classifier: &ExecutionContextClassifier,
+          ) -> Result<RunningProcess, ExecutionFactCollectionError> {
+              let lifetime = read_process_lifetime(source, pid, "stat")?;
+
+              let executable_path = source
+                  .executable_path(pid)
+                  .map_err(|source| source_error("executable", source))?;
+              let executable = observe_executable(executable_path, ExecutionOrigin::Direct)
+                  .map_err(ExecutionFactCollectionError::Executable)?;
+              let executable = enrich_execution_target_context_with_lifetime(
+                  source,
+                  pid,
+                  lifetime,
+                  executable,
+                  classifier,
+              )?;
+
+              Ok(RunningProcess::new(lifetime, executable))
+          }
+
+          /// Enriches an already-observed execution target with stable requester process context.
+          ///
+          /// The supplied executable identity is preserved. The requester PID is used only for
+          /// argv, cgroup, verified package, parent, and execution-origin context. The requester
+          /// lifetime is verified before and after collection so PID reuse cannot mix identities.
+          ///
+          /// # Errors
+          ///
+          /// Returns an error when requester facts cannot be read or parsed, the requester or its
+          /// parent changes lifetime during collection, or verified execution facts conflict.
+          pub fn enrich_execution_target_context<S: LinuxExecutionFactSource>(
+              source: &S,
+              pid: u32,
+              executable: ObservedExecutable,
+              classifier: &ExecutionContextClassifier,
+          ) -> Result<ObservedExecutable, ExecutionFactCollectionError> {
+              let lifetime = read_process_lifetime(source, pid, "stat")?;
+              enrich_execution_target_context_with_lifetime(
+                  source,
+                  pid,
+                  lifetime,
+                  executable,
+                  classifier,
+              )
+          }
+
+          fn enrich_execution_target_context_with_lifetime<S: LinuxExecutionFactSource>(
+              source: &S,
+              pid: u32,
+              lifetime: ProcessLifetime,
+              executable: ObservedExecutable,
+              classifier: &ExecutionContextClassifier,
+          ) -> Result<ObservedExecutable, ExecutionFactCollectionError> {
+              let cmdline = source
+                  .cmdline_bytes(pid)
+                  .map_err(|source| source_error("cmdline", source))?;
+              let argv = parse_cmdline(&cmdline)?;
+
+              let cgroup = source
+                  .cgroup_text(pid)
+                  .map_err(|source| source_error("cgroup", source))?;
+              let unified_cgroup = parse_unified_cgroup(&cgroup)?;
+
+              let status = source
+                  .status_text(pid)
+                  .map_err(|source| source_error("status", source))?;
+              let parent_pid = parse_parent_pid(&status)?;
+
+              let mut facts = LinuxExecutionFacts::new(argv).with_cgroup(unified_cgroup);
+
+              if parent_pid != 0 {
+                  let parent_lifetime = read_process_lifetime(source, parent_pid, "parent stat")?;
+                  let parent_path = source
+                      .executable_path(parent_pid)
+                      .map_err(|source| source_error("parent executable", source))?;
+                  let parent = observe_executable(parent_path, ExecutionOrigin::Direct)
+                      .map_err(ExecutionFactCollectionError::Executable)?;
+                  verify_process_lifetime(source, parent_lifetime, "parent stat")?;
+                  facts = facts.with_parent(parent);
+              }
+
+              if let Some(info) = source
+                  .flatpak_info(pid)
+                  .map_err(|source| source_error("flatpak metadata", source))?
+              {
+                  let app_id = parse_flatpak_app_id(&info)?;
+                  facts = facts.with_verified_flatpak_app_id(app_id);
+              }
+
+              if let Some(label) = source
+                  .security_label(pid)
+                  .map_err(|source| source_error("security label", source))?
+                  && let Some(package_id) = parse_snap_enforced_package(&label)
+              {
+                  facts = facts.with_verified_snap_package_id(package_id);
+              }
+
+              verify_process_lifetime(source, lifetime, "stat")?;
+              enrich_execution_context(executable, &facts, classifier)
+                  .map_err(ExecutionFactCollectionError::Context)
+          }
+
+          '''
+          path.write_text(text[:start] + replacement + text[end:])
+
+          lib = Path("platform/linux/src/lib.rs")
+          text = lib.read_text()
+          old = '''pub use execution_fact_collector::{
+              ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
+              collect_execution_observation, collect_running_process,
+          };'''
+          new = '''pub use execution_fact_collector::{
+              ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
+              collect_execution_observation, collect_running_process, enrich_execution_target_context,
+          };'''
+          if old not in text:
+              raise SystemExit("execution_fact_collector export block changed unexpectedly")
+          lib.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Format Rust
+        run: cargo fmt --all
+
+      - name: Verify target context tests
+        run: |
+          cargo test -p focus-linux --test execution_fact_collector --locked
+          cargo test -p focus-linux --test execution_target_context --locked
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/apply-task12-target-context.yml
+
+      - name: Commit verified refactor
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add platform/linux/src/execution_fact_collector.rs platform/linux/src/lib.rs .github/workflows/apply-task12-target-context.yml
+          git commit -m "feat(linux): enrich fd target with requester context"
+          git push
