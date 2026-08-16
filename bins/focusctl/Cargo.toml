@@ -5,5 +5,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+focus-protocol = { path = "../../crates/focus-protocol", version = "=0.0.0" }
+getrandom = { version = "=0.4.3", features = ["std"] }
+
 [lints]
 workspace = true

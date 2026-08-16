@@ -10,10 +10,20 @@ mod state_machine;
 mod vpn;
 
 pub use decision::{BlockReason, Decision};
-pub use emergency::EmergencyState;
+pub use emergency::{
+    BootId, EMERGENCY_DELAY_SECONDS, EmergencyClockEvent, EmergencyClockSample, EmergencyDecision,
+    EmergencyError, EmergencyEvaluation, EmergencyRequest, EmergencyState, EmergencyTimingState,
+    RecoveryCodeHash, WALL_CLOCK_DRIFT_TOLERANCE_SECONDS,
+};
 pub use policy::{DecisionContext, PolicyEngine, PolicySet};
-pub use profile::{PolicyVersion, Profile, ProfileId, SessionPolicySnapshot};
-pub use schedule::ScheduleSource;
+pub use profile::{
+    PolicyVersion, Profile, ProfileId, SESSION_POLICY_SCHEMA_VERSION, SessionPolicySnapshot,
+    SessionPolicySnapshotError,
+};
+pub use schedule::{Schedule, ScheduleId, ScheduleSource, ScheduleStatus, SchedulerOutcome};
 pub use session::SessionId;
-pub use state_machine::{SessionGuard, SessionState, TransitionError};
+pub use state_machine::{
+    SessionEvent, SessionMachine, SessionState, TransitionContext, TransitionError,
+    ValidatedTransition,
+};
 pub use vpn::VpnId;
