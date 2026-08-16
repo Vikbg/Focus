@@ -1,0 +1,35 @@
+name: Update P2 Cargo lockfile
+
+on:
+  push:
+    branches:
+      - "agent/p2-linux-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Regenerate lockfile
+        run: cargo generate-lockfile
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/update-p2-lockfile.yml
+
+      - name: Commit lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock .github/workflows/update-p2-lockfile.yml
+          git commit -m "chore: refresh Cargo lockfile for Linux backend"
+          git push
