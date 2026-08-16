@@ -148,6 +148,9 @@ dependencies = [
 [[package]]
 name = "focus-platform"
 version = "0.0.0"
+dependencies = [
+ "focus-core",
+]
 
 [[package]]
 name = "focus-protocol"
