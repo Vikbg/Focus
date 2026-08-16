@@ -42,7 +42,11 @@ struct Source {
 }
 
 impl Source {
-    fn new(pid: u32, executable: PathBuf, stats: impl IntoIterator<Item = io::Result<String>>) -> Self {
+    fn new(
+        pid: u32,
+        executable: PathBuf,
+        stats: impl IntoIterator<Item = io::Result<String>>,
+    ) -> Self {
         Self {
             pid,
             executable,
@@ -56,7 +60,10 @@ impl LinuxExecutionFactSource for Source {
         if pid == self.pid {
             Ok(self.executable.clone())
         } else {
-            Err(io::Error::new(io::ErrorKind::NotFound, "process disappeared"))
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "process disappeared",
+            ))
         }
     }
 
@@ -73,10 +80,12 @@ impl LinuxExecutionFactSource for Source {
     }
 
     fn stat_text(&self, _pid: u32) -> io::Result<String> {
-        self.stats
-            .borrow_mut()
-            .pop_front()
-            .unwrap_or_else(|| Err(io::Error::new(io::ErrorKind::NotFound, "process disappeared")))
+        self.stats.borrow_mut().pop_front().unwrap_or_else(|| {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "process disappeared",
+            ))
+        })
     }
 
     fn flatpak_info(&self, _pid: u32) -> io::Result<Option<String>> {
@@ -128,10 +137,11 @@ fn plan(digest: [u8; 32]) -> ProcessEnforcementPlan {
 #[test]
 fn linux_control_revalidates_proc_starttime_after_handle_open_before_termination() {
     let path = executable();
-    let observed_digest = focus_linux::observe_executable(&path, focus_core::ExecutionOrigin::Direct)
-        .unwrap()
-        .digest()
-        .unwrap();
+    let observed_digest =
+        focus_linux::observe_executable(&path, focus_core::ExecutionOrigin::Direct)
+            .unwrap()
+            .digest()
+            .unwrap();
     let source = Source::new(
         700,
         path.clone(),
@@ -158,10 +168,11 @@ fn linux_control_revalidates_proc_starttime_after_handle_open_before_termination
 #[test]
 fn pid_reuse_after_handle_open_fails_closed_before_signal() {
     let path = executable();
-    let observed_digest = focus_linux::observe_executable(&path, focus_core::ExecutionOrigin::Direct)
-        .unwrap()
-        .digest()
-        .unwrap();
+    let observed_digest =
+        focus_linux::observe_executable(&path, focus_core::ExecutionOrigin::Direct)
+            .unwrap()
+            .digest()
+            .unwrap();
     let source = Source::new(
         701,
         path.clone(),
