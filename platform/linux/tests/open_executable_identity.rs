@@ -41,9 +41,15 @@ fn opened_executable_identity_survives_path_replacement_without_toctou() {
 
     let observed = observe_open_executable(opened.as_fd(), ExecutionOrigin::Direct).unwrap();
 
-    assert_eq!(observed.filesystem_identity(), expected.filesystem_identity());
+    assert_eq!(
+        observed.filesystem_identity(),
+        expected.filesystem_identity()
+    );
     assert_eq!(observed.digest(), expected.digest());
-    assert_ne!(observed.filesystem_identity(), replacement.filesystem_identity());
+    assert_ne!(
+        observed.filesystem_identity(),
+        replacement.filesystem_identity()
+    );
     assert_ne!(observed.digest(), replacement.digest());
 
     fs::remove_dir_all(dir).unwrap();
