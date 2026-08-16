@@ -12,6 +12,7 @@ use crate::{
 };
 
 const PROC_ROOT: &str = "/proc";
+const PROC_STAT_STARTTIME_INDEX_AFTER_COMM: usize = 19;
 
 /// Read-only Linux process facts required to classify one execution.
 pub trait LinuxExecutionFactSource {
@@ -42,6 +43,13 @@ pub trait LinuxExecutionFactSource {
     ///
     /// Returns an error when process status cannot be read safely.
     fn status_text(&self, pid: u32) -> io::Result<String>;
+
+    /// Returns the raw process stat text used to bind a PID to one lifetime.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when process stat data cannot be read safely.
+    fn stat_text(&self, pid: u32) -> io::Result<String>;
 
     /// Returns Flatpak namespace metadata when it exists inside the process root.
     ///
@@ -79,6 +87,10 @@ impl LinuxExecutionFactSource for ProcfsExecutionFactSource {
         fs::read_to_string(proc_path(pid, "status"))
     }
 
+    fn stat_text(&self, pid: u32) -> io::Result<String> {
+        fs::read_to_string(proc_path(pid, "stat"))
+    }
+
     fn flatpak_info(&self, pid: u32) -> io::Result<Option<String>> {
         read_optional_text(proc_path(pid, "root/.flatpak-info"))
     }
@@ -98,6 +110,8 @@ pub enum ExecutionFactCollectionError {
     InvalidCmdline,
     MissingUnifiedCgroup,
     InvalidParentPid,
+    InvalidProcessIdentity,
+    ProcessIdentityChanged,
     InvalidFlatpakInfo,
     Executable(ExecutableIdentityError),
     Context(ExecutionContextError),
@@ -117,6 +131,12 @@ impl fmt::Display for ExecutionFactCollectionError {
                 formatter.write_str("Linux process is missing unified cgroup v2 membership")
             }
             Self::InvalidParentPid => formatter.write_str("invalid Linux parent process id"),
+            Self::InvalidProcessIdentity => {
+                formatter.write_str("invalid Linux process lifetime identity")
+            }
+            Self::ProcessIdentityChanged => {
+                formatter.write_str("Linux process identity changed during observation")
+            }
             Self::InvalidFlatpakInfo => formatter.write_str("invalid Flatpak application metadata"),
             Self::Executable(error) => write!(formatter, "invalid executable identity: {error}"),
             Self::Context(error) => write!(formatter, "invalid execution context: {error}"),
@@ -133,6 +153,8 @@ impl Error for ExecutionFactCollectionError {
             Self::InvalidCmdline
             | Self::MissingUnifiedCgroup
             | Self::InvalidParentPid
+            | Self::InvalidProcessIdentity
+            | Self::ProcessIdentityChanged
             | Self::InvalidFlatpakInfo => None,
         }
     }
@@ -142,17 +164,22 @@ impl Error for ExecutionFactCollectionError {
 ///
 /// Package-looking strings in process arguments are never treated as package identity. Flatpak
 /// identity comes only from `.flatpak-info` visible inside the process root. Snap identity comes
-/// only from a kernel security label in enforce mode.
+/// only from a kernel security label in enforce mode. The process and its direct parent are each
+/// bound to a stable `(pid, starttime)` lifetime before and after observation so PID reuse cannot
+/// combine facts from different processes.
 ///
 /// # Errors
 ///
 /// Returns an error when required procfs facts cannot be read or parsed, the executable or parent
-/// identity cannot be observed safely, or verified execution facts conflict.
+/// identity cannot be observed safely, a process lifetime changes during collection, or verified
+/// execution facts conflict.
 pub fn collect_execution_observation<S: LinuxExecutionFactSource>(
     source: &S,
     pid: u32,
     classifier: &ExecutionContextClassifier,
 ) -> Result<ObservedExecutable, ExecutionFactCollectionError> {
+    let process_starttime = read_process_starttime(source, pid, "stat")?;
+
     let executable_path = source
         .executable_path(pid)
         .map_err(|source| source_error("executable", source))?;
@@ -177,11 +204,13 @@ pub fn collect_execution_observation<S: LinuxExecutionFactSource>(
     let mut facts = LinuxExecutionFacts::new(argv).with_cgroup(unified_cgroup);
 
     if parent_pid != 0 {
+        let parent_starttime = read_process_starttime(source, parent_pid, "parent stat")?;
         let parent_path = source
             .executable_path(parent_pid)
             .map_err(|source| source_error("parent executable", source))?;
         let parent = observe_executable(parent_path, ExecutionOrigin::Direct)
             .map_err(ExecutionFactCollectionError::Executable)?;
+        verify_process_starttime(source, parent_pid, parent_starttime, "parent stat")?;
         facts = facts.with_parent(parent);
     }
 
@@ -201,12 +230,72 @@ pub fn collect_execution_observation<S: LinuxExecutionFactSource>(
         facts = facts.with_verified_snap_package_id(package_id);
     }
 
+    verify_process_starttime(source, pid, process_starttime, "stat")?;
+
     enrich_execution_context(executable, &facts, classifier)
         .map_err(ExecutionFactCollectionError::Context)
 }
 
 fn source_error(field: &'static str, source: io::Error) -> ExecutionFactCollectionError {
     ExecutionFactCollectionError::Source { field, source }
+}
+
+fn read_process_starttime<S: LinuxExecutionFactSource>(
+    source: &S,
+    pid: u32,
+    field: &'static str,
+) -> Result<u64, ExecutionFactCollectionError> {
+    let stat = source
+        .stat_text(pid)
+        .map_err(|source| source_error(field, source))?;
+    parse_process_starttime(pid, &stat)
+}
+
+fn verify_process_starttime<S: LinuxExecutionFactSource>(
+    source: &S,
+    pid: u32,
+    expected: u64,
+    field: &'static str,
+) -> Result<(), ExecutionFactCollectionError> {
+    let current = read_process_starttime(source, pid, field)?;
+    if current == expected {
+        Ok(())
+    } else {
+        Err(ExecutionFactCollectionError::ProcessIdentityChanged)
+    }
+}
+
+fn parse_process_starttime(
+    expected_pid: u32,
+    stat: &str,
+) -> Result<u64, ExecutionFactCollectionError> {
+    let stat = stat.trim_end();
+    let open_paren = stat
+        .find('(')
+        .ok_or(ExecutionFactCollectionError::InvalidProcessIdentity)?;
+    let close_paren = stat
+        .rfind(')')
+        .filter(|close_paren| *close_paren > open_paren)
+        .ok_or(ExecutionFactCollectionError::InvalidProcessIdentity)?;
+
+    let pid = stat[..open_paren]
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| ExecutionFactCollectionError::InvalidProcessIdentity)?;
+    if pid != expected_pid {
+        return Err(ExecutionFactCollectionError::InvalidProcessIdentity);
+    }
+
+    let fields = stat[close_paren + 1..]
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    let starttime = fields
+        .get(PROC_STAT_STARTTIME_INDEX_AFTER_COMM)
+        .ok_or(ExecutionFactCollectionError::InvalidProcessIdentity)?;
+
+    starttime
+        .parse::<u64>()
+        .map_err(|_| ExecutionFactCollectionError::InvalidProcessIdentity)
 }
 
 fn proc_path(pid: u32, suffix: &str) -> PathBuf {
