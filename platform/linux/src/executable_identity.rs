@@ -75,7 +75,7 @@ pub fn observe_executable(
         .to_owned();
 
     let file = File::open(&canonical)?;
-    observe_file(file, canonical_path, origin)
+    observe_file(&file, canonical_path, origin)
 }
 
 /// Collects executable identity from an already-open kernel file descriptor.
@@ -101,11 +101,11 @@ pub fn observe_open_executable(
         .ok_or(ExecutableIdentityError::NonUtf8Path)?
         .to_owned();
 
-    observe_file(file, canonical_path, origin)
+    observe_file(&file, canonical_path, origin)
 }
 
 fn observe_file(
-    file: File,
+    file: &File,
     canonical_path: String,
     origin: ExecutionOrigin,
 ) -> Result<ObservedExecutable, ExecutableIdentityError> {
@@ -117,7 +117,7 @@ fn observe_file(
         return Err(ExecutableIdentityError::NotExecutable);
     }
 
-    let digest = hash_open_file(&file)?;
+    let digest = hash_open_file(file)?;
     Ok(ObservedExecutable::new(canonical_path)
         .with_filesystem_identity(metadata.dev(), metadata.ino())
         .with_digest(digest)
