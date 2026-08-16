@@ -103,6 +103,23 @@ fn second_daemon_cannot_replace_a_live_socket() {
 }
 
 #[test]
+fn production_bind_reclaims_a_stale_socket_after_crash() {
+    let socket = temp_socket("stale");
+    let stale = UnixListener::bind(&socket).unwrap();
+    drop(stale);
+    let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
+
+    let listener = bind_production_socket(&socket, &policy).unwrap();
+    let client = UnixStream::connect(&socket).unwrap();
+    let (server, _) = listener.accept().unwrap();
+
+    drop(client);
+    drop(server);
+    drop(listener);
+    let _ = fs::remove_file(socket);
+}
+
+#[test]
 fn production_bind_never_removes_an_existing_regular_file() {
     let socket = temp_socket("regular-file");
     let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
