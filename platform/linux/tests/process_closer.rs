@@ -16,7 +16,9 @@ const UNKNOWN_DIGEST: [u8; 32] = [0x63; 32];
 fn plan() -> ProcessEnforcementPlan {
     ProcessEnforcementPlan::strict(
         POLICY_DIGEST,
-        vec![ProcessRule::block(ExecutableMatcher::Digest(BLOCKED_DIGEST))],
+        vec![ProcessRule::block(ExecutableMatcher::Digest(
+            BLOCKED_DIGEST,
+        ))],
         vec!["/home/student/code".to_owned()],
     )
 }
@@ -44,7 +46,8 @@ struct FakeControl {
 
 impl FakeControl {
     fn with_process(mut self, process: RunningProcess) -> Self {
-        self.processes.insert(process.lifetime().pid(), Some(process));
+        self.processes
+            .insert(process.lifetime().pid(), Some(process));
         self
     }
 
@@ -175,8 +178,8 @@ fn handle_open_failure_is_fail_closed_before_termination() {
 
 #[test]
 fn termination_failure_is_reported_instead_of_claiming_success() {
-    let mut control = FakeControl::default()
-        .with_process(process(100, 1_000, "/tmp/one", BLOCKED_DIGEST));
+    let mut control =
+        FakeControl::default().with_process(process(100, 1_000, "/tmp/one", BLOCKED_DIGEST));
     control.terminate_failures.insert(100);
 
     let error = close_blocked_processes(&mut control, &plan()).unwrap_err();
@@ -192,7 +195,10 @@ fn only_explicit_blocks_are_selected_for_termination() {
     let blocked = process(100, 1_000, "/tmp/blocked", BLOCKED_DIGEST);
     let unknown = process(101, 1_001, "/opt/unknown/tool", UNKNOWN_DIGEST);
 
-    assert!(matches!(plan().decide(blocked.executable()), Decision::Block(_)));
+    assert!(matches!(
+        plan().decide(blocked.executable()),
+        Decision::Block(_)
+    ));
     assert!(matches!(
         plan().decide(unknown.executable()),
         Decision::FailClosed(_)
