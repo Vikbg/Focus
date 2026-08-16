@@ -5,5 +5,8 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+focus-core = { path = "../focus-core", version = "=0.0.0" }
+
 [lints]
 workspace = true
