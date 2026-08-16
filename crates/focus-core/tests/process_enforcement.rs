@@ -81,8 +81,8 @@ fn package_identity_blocks_flatpak_independent_of_launcher_path() {
 #[test]
 fn strict_plan_fails_closed_when_executable_identity_is_unclassifiable() {
     let plan = strict_plan();
-    let unknown = ObservedExecutable::new("/proc/self/fd/17")
-        .with_origin(ExecutionOrigin::Container);
+    let unknown =
+        ObservedExecutable::new("/proc/self/fd/17").with_origin(ExecutionOrigin::Container);
 
     assert!(matches!(plan.decide(&unknown), Decision::FailClosed(_)));
 }
