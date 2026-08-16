@@ -69,7 +69,6 @@ impl fmt::Display for ClockSampleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "Linux clock source I/O error: {error}"),
-            Self::NonUtf8Path => unreachable!(),
             Self::InvalidBootId => formatter.write_str("invalid Linux boot id"),
             Self::InvalidUptime => formatter.write_str("invalid Linux uptime"),
             Self::InvalidMonotonicTime => formatter.write_str("invalid Linux monotonic time"),
