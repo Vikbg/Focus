@@ -7,8 +7,8 @@ use std::{
 use focus_core::{ExecutionOrigin, ObservedExecutable};
 
 use crate::{
-    ExecutableIdentityError, ExecutionContextClassifier, ExecutionContextError, LinuxExecutionFacts,
-    enrich_execution_context, observe_executable,
+    ExecutableIdentityError, ExecutionContextClassifier, ExecutionContextError,
+    LinuxExecutionFacts, enrich_execution_context, observe_executable,
 };
 
 const PROC_ROOT: &str = "/proc";
@@ -107,16 +107,17 @@ impl fmt::Display for ExecutionFactCollectionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Source { field, source } => {
-                write!(formatter, "Linux execution fact read failed for {field}: {source}")
+                write!(
+                    formatter,
+                    "Linux execution fact read failed for {field}: {source}"
+                )
             }
             Self::InvalidCmdline => formatter.write_str("invalid Linux process command line"),
             Self::MissingUnifiedCgroup => {
                 formatter.write_str("Linux process is missing unified cgroup v2 membership")
             }
             Self::InvalidParentPid => formatter.write_str("invalid Linux parent process id"),
-            Self::InvalidFlatpakInfo => {
-                formatter.write_str("invalid Flatpak application metadata")
-            }
+            Self::InvalidFlatpakInfo => formatter.write_str("invalid Flatpak application metadata"),
             Self::Executable(error) => write!(formatter, "invalid executable identity: {error}"),
             Self::Context(error) => write!(formatter, "invalid execution context: {error}"),
         }

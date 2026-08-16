@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeMap,
-    fs,
-    io,
+    fs, io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -48,8 +47,10 @@ impl Source {
         let mut cmdline = argv.join("\0").into_bytes();
         cmdline.push(0);
         self.cmdlines.insert(pid, cmdline);
-        self.cgroups
-            .insert(pid, format!("0::/user.slice/user-1000.slice/session-{pid}.scope\n"));
+        self.cgroups.insert(
+            pid,
+            format!("0::/user.slice/user-1000.slice/session-{pid}.scope\n"),
+        );
         self.statuses.insert(
             pid,
             format!("Name:\ttest\nState:\tS (sleeping)\nPPid:\t{ppid}\n"),
@@ -225,8 +226,7 @@ fn parent_is_reobserved_with_stable_identity_before_ide_classification() {
         .unwrap()
         .digest()
         .unwrap();
-    let classifier =
-        ExecutionContextClassifier::new(vec![ExecutableMatcher::Digest(ide_digest)]);
+    let classifier = ExecutionContextClassifier::new(vec![ExecutableMatcher::Digest(ide_digest)]);
     let source = Source::default()
         .with_process(200, ide, &["/opt/editor/renamed-ide"], 0)
         .with_process(201, child, &["/home/student/code/child"], 200);
