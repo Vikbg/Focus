@@ -3,6 +3,7 @@
 mod decision;
 mod emergency;
 mod policy;
+mod process;
 mod profile;
 mod schedule;
 mod session;
@@ -16,6 +17,10 @@ pub use emergency::{
     RecoveryCodeHash, WALL_CLOCK_DRIFT_TOLERANCE_SECONDS,
 };
 pub use policy::{DecisionContext, PolicyEngine, PolicySet};
+pub use process::{
+    ExecutableMatcher, ExecutionOrigin, ObservedExecutable, PackageIdentity, PackageKind,
+    ProcessEnforcementPlan, ProcessRule,
+};
 pub use profile::{
     PolicyVersion, Profile, ProfileId, SESSION_POLICY_SCHEMA_VERSION, SessionPolicySnapshot,
     SessionPolicySnapshotError,
