@@ -698,6 +698,16 @@ fn bind_test_socket(socket_path: &Path) -> io::Result<UnixListener> {
     UnixListener::bind(socket_path)
 }
 
+/// Binds the production Focus IPC socket without replacing an active or non-socket path.
+///
+/// A stale Unix socket is reclaimed only when connecting to it reports
+/// `ConnectionRefused`.
+///
+/// # Errors
+///
+/// Returns an error if the parent directory cannot be created, an existing path is not a
+/// stale Unix socket, the socket cannot be bound or configured, or ownership cannot be
+/// applied to the configured local UID.
 pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)?;
