@@ -1,6 +1,5 @@
 use std::{
-    fs,
-    io,
+    fs, io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
@@ -25,10 +24,7 @@ struct MountedTmpfs {
 
 impl MountedTmpfs {
     fn mount() -> io::Result<Self> {
-        let path = PathBuf::from(format!(
-            "/mnt/focus-fanotify-live-{}",
-            std::process::id()
-        ));
+        let path = PathBuf::from(format!("/mnt/focus-fanotify-live-{}", std::process::id()));
         fs::create_dir_all(&path)?;
         let status = Command::new("mount")
             .args(["-t", "tmpfs", "-o", "mode=0755,nosuid,nodev"])
@@ -59,10 +55,7 @@ fn copy_executable(source: &str, destination: &Path) -> io::Result<()> {
 }
 
 fn wait_for_permission_step(
-    channel: &mut FanotifyExecutionChannel<
-        NixFanotifyPermissionSource,
-        ProcfsExecutionFactSource,
-    >,
+    channel: &mut FanotifyExecutionChannel<NixFanotifyPermissionSource, ProcfsExecutionFactSource>,
     plan: &ProcessEnforcementPlan,
 ) -> io::Result<ExecutionPermissionStep> {
     let deadline = Instant::now() + EVENT_TIMEOUT;
