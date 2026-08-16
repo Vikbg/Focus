@@ -182,6 +182,10 @@ fn legacy_locked_session_recovers_to_protection_failure_instead_of_locked() {
     let mut store = SqliteStore::open_in_memory().unwrap();
     let session = legacy_session(503, SessionState::Locked);
     store.set_active_session(&session).unwrap();
+    let persisted = store.active_session().unwrap().unwrap();
+    assert_eq!(persisted.policy_snapshot().schema_version(), 1);
+    assert_eq!(persisted.policy_sha256(), session.policy_sha256());
+    assert!(persisted.policy_snapshot().process_enforcement_plan().is_none());
     let mut backend = RecordingBackend::default();
 
     let state = block_on_ready(recover_session(&mut store, &mut backend)).unwrap();
