@@ -7,6 +7,7 @@ mod execution_fact_collector;
 mod linux_process_control;
 mod preflight;
 mod process_closer;
+mod rustix_pidfd;
 mod systemd;
 
 pub use backend::LinuxBackend;
@@ -30,6 +31,7 @@ pub use process_closer::{
     ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
     close_blocked_processes,
 };
+pub use rustix_pidfd::RustixPidfdOps;
 
 use std::{
     error::Error,
