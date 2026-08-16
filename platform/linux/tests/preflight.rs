@@ -2,52 +2,56 @@ use focus_linux::{Health, LinuxError, SystemProbe, evaluate_preflight, require_s
 
 #[derive(Debug, Clone, Copy)]
 struct Probe {
-    systemd: bool,
-    cgroup_v2: bool,
-    fanotify: bool,
-    nftables: bool,
-    filesystem_permissions: bool,
-    privilege_model: bool,
+    systemd: Health,
+    cgroup_v2: Health,
+    fanotify: Health,
+    nftables: Health,
+    filesystem_permissions: Health,
+    privilege_model: Health,
     active_users: usize,
 }
 
 impl Probe {
     const fn healthy() -> Self {
         Self {
-            systemd: true,
-            cgroup_v2: true,
-            fanotify: true,
-            nftables: true,
-            filesystem_permissions: true,
-            privilege_model: true,
+            systemd: Health::Healthy,
+            cgroup_v2: Health::Healthy,
+            fanotify: Health::Healthy,
+            nftables: Health::Healthy,
+            filesystem_permissions: Health::Healthy,
+            privilege_model: Health::Healthy,
             active_users: 1,
         }
+    }
+
+    const fn available(health: Health) -> bool {
+        matches!(health, Health::Healthy)
     }
 }
 
 impl SystemProbe for Probe {
     fn systemd_available(&self) -> Result<bool, LinuxError> {
-        Ok(self.systemd)
+        Ok(Self::available(self.systemd))
     }
 
     fn cgroup_v2_available(&self) -> Result<bool, LinuxError> {
-        Ok(self.cgroup_v2)
+        Ok(Self::available(self.cgroup_v2))
     }
 
     fn fanotify_available(&self) -> Result<bool, LinuxError> {
-        Ok(self.fanotify)
+        Ok(Self::available(self.fanotify))
     }
 
     fn nftables_available(&self) -> Result<bool, LinuxError> {
-        Ok(self.nftables)
+        Ok(Self::available(self.nftables))
     }
 
     fn filesystem_permissions_ready(&self) -> Result<bool, LinuxError> {
-        Ok(self.filesystem_permissions)
+        Ok(Self::available(self.filesystem_permissions))
     }
 
     fn privilege_model_ready(&self) -> Result<bool, LinuxError> {
-        Ok(self.privilege_model)
+        Ok(Self::available(self.privilege_model))
     }
 
     fn active_user_count(&self) -> Result<usize, LinuxError> {
@@ -75,27 +79,27 @@ fn healthy_linux_host_satisfies_strict_preflight() {
 fn every_required_capability_fails_closed_when_missing() {
     for degraded in [
         Probe {
-            systemd: false,
+            systemd: Health::Unavailable,
             ..Probe::healthy()
         },
         Probe {
-            cgroup_v2: false,
+            cgroup_v2: Health::Unavailable,
             ..Probe::healthy()
         },
         Probe {
-            fanotify: false,
+            fanotify: Health::Unavailable,
             ..Probe::healthy()
         },
         Probe {
-            nftables: false,
+            nftables: Health::Unavailable,
             ..Probe::healthy()
         },
         Probe {
-            filesystem_permissions: false,
+            filesystem_permissions: Health::Unavailable,
             ..Probe::healthy()
         },
         Probe {
-            privilege_model: false,
+            privilege_model: Health::Unavailable,
             ..Probe::healthy()
         },
         Probe {
