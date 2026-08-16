@@ -1,6 +1,4 @@
-use focus_linux::{
-    Health, LinuxError, SystemProbe, evaluate_preflight, require_strict_preflight,
-};
+use focus_linux::{Health, LinuxError, SystemProbe, evaluate_preflight, require_strict_preflight};
 
 #[derive(Debug, Clone, Copy)]
 struct Probe {
