@@ -66,6 +66,7 @@ pub struct ObservedExecutable {
     digest: Option<[u8; 32]>,
     package: Option<PackageIdentity>,
     origin: ExecutionOrigin,
+    parent: Option<Box<ObservedExecutable>>,
 }
 
 impl ObservedExecutable {
@@ -79,6 +80,7 @@ impl ObservedExecutable {
             digest: None,
             package: None,
             origin: ExecutionOrigin::Direct,
+            parent: None,
         }
     }
 
@@ -108,6 +110,13 @@ impl ObservedExecutable {
     #[must_use]
     pub const fn with_origin(mut self, origin: ExecutionOrigin) -> Self {
         self.origin = origin;
+        self
+    }
+
+    /// Adds the stable identity of the direct parent process.
+    #[must_use]
+    pub fn with_parent(mut self, parent: ObservedExecutable) -> Self {
+        self.parent = Some(Box::new(parent));
         self
     }
 
@@ -144,6 +153,12 @@ impl ObservedExecutable {
         self.origin
     }
 
+    /// Returns the direct parent identity when it was collected.
+    #[must_use]
+    pub fn parent(&self) -> Option<&ObservedExecutable> {
+        self.parent.as_deref()
+    }
+
     const fn has_stable_identity(&self) -> bool {
         self.digest.is_some()
             || matches!((self.device, self.inode), (Some(_), Some(_)))
@@ -161,7 +176,9 @@ pub enum ExecutableMatcher {
 }
 
 impl ExecutableMatcher {
-    fn matches(&self, executable: &ObservedExecutable) -> bool {
+    /// Returns whether this stable selector matches the observed executable.
+    #[must_use]
+    pub fn matches(&self, executable: &ObservedExecutable) -> bool {
         match self {
             Self::Digest(expected) => executable.digest == Some(*expected),
             Self::Filesystem { device, inode } => {
