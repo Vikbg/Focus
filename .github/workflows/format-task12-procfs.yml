@@ -1,0 +1,35 @@
+name: Format Task 12 procfs collector
+
+on:
+  push:
+    branches:
+      - "agent/p2-process-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install rustfmt
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+
+      - name: Format Rust
+        run: cargo fmt --all
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/format-task12-procfs.yml
+
+      - name: Commit formatting
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "style: format Task 12 procfs collector"
+          git push
