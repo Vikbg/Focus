@@ -12,7 +12,9 @@ mod rustix_pidfd;
 mod systemd;
 
 pub use backend::LinuxBackend;
-pub use executable_identity::{ExecutableIdentityError, observe_executable};
+pub use executable_identity::{
+    ExecutableIdentityError, observe_executable, observe_open_executable,
+};
 pub use execution_context::{
     ExecutionContextClassifier, ExecutionContextError, LinuxExecutionFacts,
     enrich_execution_context,
@@ -67,6 +69,7 @@ impl fmt::Display for ClockSampleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "Linux clock source I/O error: {error}"),
+            Self::NonUtf8Path => unreachable!(),
             Self::InvalidBootId => formatter.write_str("invalid Linux boot id"),
             Self::InvalidUptime => formatter.write_str("invalid Linux uptime"),
             Self::InvalidMonotonicTime => formatter.write_str("invalid Linux monotonic time"),
