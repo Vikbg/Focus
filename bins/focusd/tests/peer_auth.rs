@@ -1,6 +1,5 @@
 use std::{
-    fs,
-    io,
+    fs, io,
     os::unix::{
         fs::symlink,
         net::{UnixListener, UnixStream},
