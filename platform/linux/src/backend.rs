@@ -23,9 +23,7 @@ pub struct LinuxBackend<
     process_guard: G,
 }
 
-impl Default
-    for LinuxBackend<HostSystemProbe, ProductionProcessControl, FailClosedProcessGuard>
-{
+impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, FailClosedProcessGuard> {
     fn default() -> Self {
         Self {
             probe: HostSystemProbe,
@@ -139,10 +137,7 @@ where
         Box::pin(async move { result })
     }
 
-    fn verify_process_guard(
-        &mut self,
-        expected_policy_digest: [u8; 32],
-    ) -> PlatformFuture<'_, ()> {
+    fn verify_process_guard(&mut self, expected_policy_digest: [u8; 32]) -> PlatformFuture<'_, ()> {
         let result = self
             .process_guard
             .verify(expected_policy_digest)
