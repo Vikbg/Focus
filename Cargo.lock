@@ -142,6 +142,7 @@ dependencies = [
  "focus-core",
  "focus-platform",
  "nix",
+ "sha2",
 ]
 
 [[package]]
