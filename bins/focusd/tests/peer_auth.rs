@@ -1,6 +1,9 @@
 use std::{
     fs,
-    os::unix::net::{UnixListener, UnixStream},
+    os::unix::{
+        fs::symlink,
+        net::{UnixListener, UnixStream},
+    },
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
@@ -97,6 +100,36 @@ fn second_daemon_cannot_replace_a_live_socket() {
     drop(server);
     drop(first);
     let _ = fs::remove_file(socket);
+}
+
+#[test]
+fn production_bind_never_removes_an_existing_regular_file() {
+    let socket = temp_socket("regular-file");
+    let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
+    fs::write(&socket, b"protected sentinel").unwrap();
+
+    let result = bind_production_socket(&socket, &policy);
+
+    assert!(result.is_err());
+    assert_eq!(fs::read(&socket).unwrap(), b"protected sentinel");
+    let _ = fs::remove_file(socket);
+}
+
+#[test]
+fn production_bind_never_removes_or_follows_an_existing_symlink() {
+    let socket = temp_socket("symlink");
+    let target = temp_socket("symlink-target");
+    let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
+    fs::write(&target, b"protected target").unwrap();
+    symlink(&target, &socket).unwrap();
+
+    let result = bind_production_socket(&socket, &policy);
+
+    assert!(result.is_err());
+    assert!(fs::symlink_metadata(&socket).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read(&target).unwrap(), b"protected target");
+    let _ = fs::remove_file(socket);
+    let _ = fs::remove_file(target);
 }
 
 #[test]
