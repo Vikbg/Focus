@@ -1,0 +1,51 @@
+name: Apply bind errors docs
+
+on:
+  push:
+    branches:
+      - "agent/audit-remediation-inline"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Add exact public API documentation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("bins/focusd/src/lib.rs")
+          text = path.read_text(encoding="utf-8")
+          needle = "pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {"
+          replacement = '''/// Binds the production Focus IPC socket without replacing an active or non-socket path.
+          ///
+          /// A stale Unix socket is reclaimed only when connecting to it reports
+          /// `ConnectionRefused`.
+          ///
+          /// # Errors
+          ///
+          /// Returns an error if the parent directory cannot be created, an existing path is not a
+          /// stale Unix socket, the socket cannot be bound or configured, or ownership cannot be
+          /// applied to the configured local UID.
+          pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {'''.replace("          ", "")
+
+          if text.count(needle) != 1:
+              raise SystemExit("unexpected bind_production_socket declaration")
+          path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+          PY
+          cargo fmt --all
+          rm .github/workflows/apply-bind-errors-doc.yml
+
+      - name: Commit documentation fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bins/focusd/src/lib.rs .github/workflows/apply-bind-errors-doc.yml
+          git commit -m "docs: document production socket bind errors"
+          git push
