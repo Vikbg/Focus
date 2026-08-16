@@ -1,6 +1,5 @@
 use focus_testkit::{
-    LinuxVmFixture, LinuxVmScenario, PROCESS_ENFORCEMENT_VM_FIXTURES,
-    REQUIRED_LINUX_VM_FIXTURES,
+    LinuxVmFixture, LinuxVmScenario, PROCESS_ENFORCEMENT_VM_FIXTURES, REQUIRED_LINUX_VM_FIXTURES,
 };
 
 #[test]
