@@ -1,9 +1,4 @@
-use std::{
-    collections::VecDeque,
-    fs::File,
-    io,
-    path::Path,
-};
+use std::{collections::VecDeque, fs::File, io, path::Path};
 
 use nix::{
     errno::Errno,
@@ -13,9 +8,7 @@ use nix::{
     },
 };
 
-use crate::{
-    ExecutionPermission, FanotifyExecutionEvent, FanotifyPermissionSource,
-};
+use crate::{ExecutionPermission, FanotifyExecutionEvent, FanotifyPermissionSource};
 
 /// Nix-backed fanotify permission source used by the Linux process guard.
 #[derive(Debug)]
@@ -61,8 +54,8 @@ impl NixFanotifyPermissionSource {
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
-        let fanotify = Fanotify::init(Self::init_flags(), Self::event_flags())
-            .map_err(errno_to_io)?;
+        let fanotify =
+            Fanotify::init(Self::init_flags(), Self::event_flags()).map_err(errno_to_io)?;
         let root = File::open("/")?;
 
         for mount in mounts {
