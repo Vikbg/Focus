@@ -1,3 +1,4 @@
+use focus_core::ProcessEnforcementPlan;
 use focus_platform::{GuardKind, PlatformBackend, PlatformError, PlatformFuture};
 
 use crate::{HostSystemProbe, SystemProbe, evaluate_preflight, require_strict_preflight};
@@ -30,6 +31,27 @@ impl<P: SystemProbe> PlatformBackend for LinuxBackend<P> {
             .and_then(|report| require_strict_preflight(&report))
             .map_err(|_| PlatformError::PreflightFailed);
         Box::pin(async move { result })
+    }
+
+    fn close_blocked_apps<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
+        Box::pin(async { Err(PlatformError::CloseBlockedAppsFailed) })
+    }
+
+    fn arm_process_guard<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
+        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
+    }
+
+    fn verify_process_guard(
+        &mut self,
+        _expected_policy_digest: [u8; 32],
+    ) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Err(PlatformError::GuardFailed(GuardKind::Process)) })
     }
 
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
