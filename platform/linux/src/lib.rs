@@ -4,6 +4,7 @@ mod backend;
 mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
+mod execution_permission;
 mod linux_process_control;
 mod preflight;
 mod process_closer;
@@ -20,6 +21,7 @@ pub use execution_fact_collector::{
     ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
     collect_execution_observation, collect_running_process,
 };
+pub use execution_permission::{ExecutionPermission, decide_execution_permission};
 pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
 };
