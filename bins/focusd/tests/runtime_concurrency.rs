@@ -1,4 +1,5 @@
 use std::{
+    fs,
     io::{BufRead, BufReader, Write},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
@@ -158,4 +159,37 @@ async fn conflicting_concurrent_mutations_with_same_request_id_have_one_winner()
     let _ = shutdown_tx.send(());
     server.await.unwrap();
     assert!(!socket.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_never_removes_a_replacement_path() {
+    let socket = temp_socket("shutdown-replacement");
+    let server_socket = socket.clone();
+    let store = SqliteStore::open_in_memory().unwrap();
+    let service = DaemonService::new(store, FakeBackend::default());
+    let runtime = DaemonRuntime::new(service);
+    let policy = PeerPolicy::new(
+        nix::unistd::geteuid().as_raw(),
+        std::env::current_exe().unwrap(),
+    );
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+    let server = tokio::spawn(async move {
+        runtime
+            .serve_until(&server_socket, &policy, async {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    wait_for_socket(&socket).await;
+    fs::remove_file(&socket).unwrap();
+    fs::write(&socket, b"replacement sentinel").unwrap();
+
+    let _ = shutdown_tx.send(());
+    server.await.unwrap();
+
+    assert_eq!(fs::read(&socket).unwrap(), b"replacement sentinel");
+    let _ = fs::remove_file(socket);
 }
