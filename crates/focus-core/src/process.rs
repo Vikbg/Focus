@@ -207,8 +207,55 @@ impl ProcessRule {
         }
     }
 
+    /// Returns the stable executable selector used by this rule.
+    #[must_use]
+    pub const fn matcher(&self) -> &ExecutableMatcher {
+        &self.matcher
+    }
+
     fn matches(&self, executable: &ObservedExecutable) -> bool {
         self.matcher.matches(executable)
+    }
+}
+
+/// Frozen process-policy inputs stored as part of a session policy snapshot.
+///
+/// The policy intentionally contains no digest. A digest belongs to the complete session
+/// snapshot and is attached only when this policy is compiled into an enforcement plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcessPolicy {
+    rules: Vec<ProcessRule>,
+    trusted_workspace_roots: Vec<String>,
+}
+
+impl ProcessPolicy {
+    /// Creates strict process-policy inputs for a protected session.
+    #[must_use]
+    pub const fn strict(rules: Vec<ProcessRule>, trusted_workspace_roots: Vec<String>) -> Self {
+        Self {
+            rules,
+            trusted_workspace_roots,
+        }
+    }
+
+    /// Returns the frozen process rules in canonical order.
+    #[must_use]
+    pub fn rules(&self) -> &[ProcessRule] {
+        &self.rules
+    }
+
+    /// Returns frozen trusted development workspace roots.
+    #[must_use]
+    pub fn trusted_workspace_roots(&self) -> &[String] {
+        &self.trusted_workspace_roots
+    }
+
+    pub(crate) fn compile(&self, policy_digest: [u8; 32]) -> ProcessEnforcementPlan {
+        ProcessEnforcementPlan::strict(
+            policy_digest,
+            self.rules.clone(),
+            self.trusted_workspace_roots.clone(),
+        )
     }
 }
 
