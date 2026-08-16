@@ -9,7 +9,7 @@ use focus_core::{
     ProcessRule, Profile, ProfileId, RecoveryCodeHash, SessionId, SessionPolicySnapshot,
     SessionState,
 };
-use focus_platform::{GuardKind, PlatformBackend, PlatformError, PlatformFuture};
+use focus_platform::{GuardKind, PlatformBackend, PlatformFuture};
 use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
 use focusd::{ArmError, arm_session, recover_session};
 
