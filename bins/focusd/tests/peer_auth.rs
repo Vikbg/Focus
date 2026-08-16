@@ -92,8 +92,7 @@ fn second_daemon_cannot_replace_a_live_socket() {
     let policy = PeerPolicy::new(current_uid(), std::env::current_exe().unwrap());
 
     let error = bind_production_socket(&socket, &policy)
-        .err()
-        .expect("second daemon replaced a live socket");
+        .expect_err("second daemon replaced a live socket");
 
     assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
     let client = UnixStream::connect(&socket).unwrap();
@@ -128,8 +127,7 @@ fn production_bind_never_removes_an_existing_regular_file() {
     fs::write(&socket, b"protected sentinel").unwrap();
 
     let error = bind_production_socket(&socket, &policy)
-        .err()
-        .expect("production bind replaced a regular file");
+        .expect_err("production bind replaced a regular file");
 
     assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
     assert_eq!(fs::read(&socket).unwrap(), b"protected sentinel");
