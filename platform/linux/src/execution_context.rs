@@ -62,7 +62,7 @@ impl LinuxExecutionFacts {
         self
     }
 
-    /// Adds the digest of an AppImage backing file verified by the Linux collector.
+    /// Adds the digest of an `AppImage` backing file verified by the Linux collector.
     #[must_use]
     pub const fn with_verified_appimage_digest(mut self, digest: [u8; 32]) -> Self {
         self.verified_appimage_digest = Some(digest);
