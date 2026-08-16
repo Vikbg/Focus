@@ -21,7 +21,10 @@ pub use execution_fact_collector::{
     ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
     collect_execution_observation, collect_running_process,
 };
-pub use execution_permission::{ExecutionPermission, decide_execution_permission};
+pub use execution_permission::{
+    ExecutionAttempt, ExecutionPermission, ExecutionPermissionChannel, ExecutionPermissionStep,
+    decide_execution_permission, process_next_execution_permission,
+};
 pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
 };
