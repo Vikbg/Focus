@@ -8,8 +8,7 @@ use crate::{
 };
 
 /// Production process-control stack used by the Linux backend.
-pub type ProductionProcessControl =
-    LinuxProcessControl<ProcfsExecutionFactSource, RustixPidfdOps>;
+pub type ProductionProcessControl = LinuxProcessControl<ProcfsExecutionFactSource, RustixPidfdOps>;
 
 /// Linux platform backend that owns strict preflight and process closure.
 ///

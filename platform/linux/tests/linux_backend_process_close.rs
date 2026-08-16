@@ -31,13 +31,27 @@ fn block_on_ready<F: Future>(future: F) -> F::Output {
 struct HealthyProbe;
 
 impl SystemProbe for HealthyProbe {
-    fn systemd_available(&self) -> Result<bool, LinuxError> { Ok(true) }
-    fn cgroup_v2_available(&self) -> Result<bool, LinuxError> { Ok(true) }
-    fn fanotify_available(&self) -> Result<bool, LinuxError> { Ok(true) }
-    fn nftables_available(&self) -> Result<bool, LinuxError> { Ok(true) }
-    fn filesystem_permissions_ready(&self) -> Result<bool, LinuxError> { Ok(true) }
-    fn privilege_model_ready(&self) -> Result<bool, LinuxError> { Ok(true) }
-    fn active_user_count(&self) -> Result<usize, LinuxError> { Ok(1) }
+    fn systemd_available(&self) -> Result<bool, LinuxError> {
+        Ok(true)
+    }
+    fn cgroup_v2_available(&self) -> Result<bool, LinuxError> {
+        Ok(true)
+    }
+    fn fanotify_available(&self) -> Result<bool, LinuxError> {
+        Ok(true)
+    }
+    fn nftables_available(&self) -> Result<bool, LinuxError> {
+        Ok(true)
+    }
+    fn filesystem_permissions_ready(&self) -> Result<bool, LinuxError> {
+        Ok(true)
+    }
+    fn privilege_model_ready(&self) -> Result<bool, LinuxError> {
+        Ok(true)
+    }
+    fn active_user_count(&self) -> Result<usize, LinuxError> {
+        Ok(1)
+    }
 }
 
 #[derive(Debug)]
@@ -100,7 +114,9 @@ impl ProcessControl for Control {
 fn plan() -> ProcessEnforcementPlan {
     ProcessEnforcementPlan::strict(
         POLICY_DIGEST,
-        vec![ProcessRule::block(ExecutableMatcher::Digest(BLOCKED_DIGEST))],
+        vec![ProcessRule::block(ExecutableMatcher::Digest(
+            BLOCKED_DIGEST,
+        ))],
         Vec::new(),
     )
 }
@@ -135,7 +151,9 @@ fn typed_process_guard_remains_fail_closed_after_initial_close_support() {
 
     assert_eq!(
         block_on_ready(backend.arm_process_guard(&process_plan)),
-        Err(PlatformError::GuardFailed(focus_platform::GuardKind::Process))
+        Err(PlatformError::GuardFailed(
+            focus_platform::GuardKind::Process
+        ))
     );
 }
 
