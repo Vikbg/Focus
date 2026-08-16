@@ -19,3 +19,12 @@ fn rustix_pidfd_ops_rejects_zero_pid_before_opening_a_handle() {
 
     assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
 }
+
+#[test]
+fn rustix_pidfd_ops_rejects_values_outside_signed_pid_range() {
+    let mut ops = RustixPidfdOps;
+
+    let error = ops.open_process(u32::MAX).unwrap_err();
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+}
