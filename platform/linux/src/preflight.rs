@@ -1,7 +1,7 @@
 use std::{
     error::Error,
     fmt, fs, io,
-    os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt},
+    os::unix::fs::{MetadataExt, PermissionsExt},
     path::Path,
     process::{Command, Stdio},
 };
@@ -92,7 +92,10 @@ impl fmt::Display for LinuxError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Probe { capability, source } => {
-                write!(formatter, "Linux preflight probe failed for {capability}: {source}")
+                write!(
+                    formatter,
+                    "Linux preflight probe failed for {capability}: {source}"
+                )
             }
             Self::InvalidProcessStatus => {
                 formatter.write_str("Linux preflight could not parse effective UID")
