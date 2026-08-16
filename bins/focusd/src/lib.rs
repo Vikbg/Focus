@@ -699,11 +699,36 @@ fn bind_test_socket(socket_path: &Path) -> io::Result<UnixListener> {
 }
 
 pub fn bind_production_socket(socket_path: &Path, policy: &PeerPolicy) -> io::Result<UnixListener> {
-    if socket_path.exists() {
-        fs::remove_file(socket_path)?;
-    }
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)?;
+    }
+
+    match fs::symlink_metadata(socket_path) {
+        Ok(metadata) => {
+            use std::os::unix::fs::FileTypeExt;
+
+            if !metadata.file_type().is_socket() {
+  return Err(io::Error::new(
+      io::ErrorKind::AlreadyExists,
+      "refusing to replace a non-socket IPC path",
+  ));
+            }
+
+            match UnixStream::connect(socket_path) {
+  Ok(_) => {
+      return Err(io::Error::new(
+          io::ErrorKind::AddrInUse,
+          "Focus daemon socket is already active",
+      ));
+  }
+  Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+      fs::remove_file(socket_path)?;
+  }
+  Err(error) => return Err(error),
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
 
     let listener = UnixListener::bind(socket_path)?;
