@@ -221,10 +221,7 @@ impl PlatformBackend for FakeBackend {
         })
     }
 
-    fn verify_process_guard(
-        &mut self,
-        expected_policy_digest: [u8; 32],
-    ) -> PlatformFuture<'_, ()> {
+    fn verify_process_guard(&mut self, expected_policy_digest: [u8; 32]) -> PlatformFuture<'_, ()> {
         let guard = GuardKind::Process;
         let should_fail = Self::should_fail(self.failing_verifications, guard)
             || !self.guard_is_armed(guard)
