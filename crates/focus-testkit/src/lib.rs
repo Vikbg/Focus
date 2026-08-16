@@ -2,7 +2,7 @@
 
 pub const CRATE_NAME: &str = "focus-testkit";
 
-/// Linux lifecycle scenarios that must be exercised in a disposable virtual machine.
+/// Linux lifecycle and privileged enforcement scenarios exercised in disposable virtual machines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinuxVmScenario {
     Boot,
@@ -10,6 +10,7 @@ pub enum LinuxVmScenario {
     SuspendResume,
     DaemonRestart,
     MultiUser,
+    FanotifyPermission,
 }
 
 /// Metadata consumed by the disposable Linux VM harness.
@@ -90,3 +91,12 @@ pub const REQUIRED_LINUX_VM_FIXTURES: [LinuxVmFixture; 5] = [
     ),
     LinuxVmFixture::new(LinuxVmScenario::MultiUser, "multi-user", false, false, 2),
 ];
+
+/// Task 12 privileged process-enforcement fixtures.
+pub const PROCESS_ENFORCEMENT_VM_FIXTURES: [LinuxVmFixture; 1] = [LinuxVmFixture::new(
+    LinuxVmScenario::FanotifyPermission,
+    "fanotify-permission",
+    false,
+    false,
+    1,
+)];
