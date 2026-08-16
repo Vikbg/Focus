@@ -15,38 +15,112 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Restore last healthy daemon library
+      - name: Restore proven healthy daemon library and reapply Task 12 binding
         run: |
-          git fetch --depth=1 origin 4407ee885e137e1f3694f3144c060a0940802840
-          git show 4407ee885e137e1f3694f3144c060a0940802840:bins/focusd/src/lib.rs > bins/focusd/src/lib.rs
+          git fetch --depth=1 origin 1b826fa9236803d8cb7fdcae8c90f8f2e9367bcd
+          git show 1b826fa9236803d8cb7fdcae8c90f8f2e9367bcd:bins/focusd/src/lib.rs > bins/focusd/src/lib.rs
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("bins/focusd/src/lib.rs")
           text = path.read_text(encoding="utf-8")
-          required = [
-              "LinuxEmergencyError",
-              "pub use service::DaemonService",
-              "SessionState::Preflight",
-              "MAX_FRAME_BYTES",
-              "ProcessEnforcementPlan",
-          ]
-          missing = [marker for marker in required if marker not in text]
-          if missing:
-              raise SystemExit(f"healthy lib marker missing: {missing}")
 
-          old = '''    async fn arm_process_guard(\n        &mut self,\n        plan: &ProcessEnforcementPlan,\n    ) -> Result<(), PlatformError> {\n'''
-          new = '''    /// Arms the process guard against a frozen enforcement plan and records it for compensation.\n    ///\n    /// # Errors\n    ///\n    /// Returns the platform error without adding Process to the applied ledger when arming fails.\n    pub async fn arm_process_guard(\n        &mut self,\n        plan: &ProcessEnforcementPlan,\n    ) -> Result<(), PlatformError> {\n'''
-          if text.count(old) != 1:
-              raise SystemExit(f"expected one typed process arm method, found {text.count(old)}")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          required_before = [
+              "LinuxEmergencyError",
+              "pub use service::{DaemonService, DaemonSnapshot, ProtectionHealth};",
+              "DaemonState::Preflight",
+              "MAX_FRAME_BYTES",
+              "restore_site_blocked",
+              "mod config;",
+              "mod linux_emergency;",
+          ]
+          missing = [marker for marker in required_before if marker not in text]
+          if missing:
+              raise SystemExit(f"healthy daemon base marker missing: {missing}")
+
+          replacements = [
+              (
+                  '''    EmergencyRequest, SessionEvent, SessionMachine, SessionState, TransitionContext,\n    TransitionError,\n''',
+                  '''    EmergencyRequest, ProcessEnforcementPlan, SessionEvent, SessionMachine, SessionState,\n    TransitionContext, TransitionError,\n''',
+              ),
+              (
+                  '''const REQUIRED_GUARDS: [GuardKind; 4] = [\n    GuardKind::Process,\n    GuardKind::Network,\n    GuardKind::Browser,\n    GuardKind::Privilege,\n];\n''',
+                  '''const NON_PROCESS_GUARDS: [GuardKind; 3] = [\n    GuardKind::Network,\n    GuardKind::Browser,\n    GuardKind::Privilege,\n];\n''',
+              ),
+              (
+                  '''pub enum ArmError {\n    ActiveSessionExists,\n    Store(StoreError),\n''',
+                  '''pub enum ArmError {\n    ActiveSessionExists,\n    MissingProcessPolicy,\n    Store(StoreError),\n''',
+              ),
+              (
+                  '''            Self::ActiveSessionExists => formatter.write_str("another Focus session is active"),\n            Self::Store(error) => write!(formatter, "session store error: {error}"),\n''',
+                  '''            Self::ActiveSessionExists => formatter.write_str("another Focus session is active"),\n            Self::MissingProcessPolicy => {\n                formatter.write_str("session snapshot is missing frozen process policy")\n            }\n            Self::Store(error) => write!(formatter, "session store error: {error}"),\n''',
+              ),
+              (
+                  '''            Self::ActiveSessionExists\n            | Self::Transition(_)\n''',
+                  '''            Self::ActiveSessionExists\n            | Self::MissingProcessPolicy\n            | Self::Transition(_)\n''',
+              ),
+              (
+                  '''    async fn close_blocked_apps(&mut self) -> Result<(), PlatformError> {\n        self.backend.close_blocked_apps().await\n    }\n\n    /// Arms one guard and records it only after the platform operation succeeds.\n''',
+                  '''    async fn close_blocked_apps(\n        &mut self,\n        plan: &ProcessEnforcementPlan,\n    ) -> Result<(), PlatformError> {\n        self.backend.close_blocked_apps(plan).await\n    }\n\n    /// Arms the process guard against a frozen enforcement plan and records it for compensation.\n    ///\n    /// # Errors\n    ///\n    /// Returns the platform error without adding Process to the applied ledger when arming fails.\n    pub async fn arm_process_guard(\n        &mut self,\n        plan: &ProcessEnforcementPlan,\n    ) -> Result<(), PlatformError> {\n        self.backend.arm_process_guard(plan).await?;\n        self.applied.push(GuardKind::Process);\n        Ok(())\n    }\n\n    async fn verify_process_guard(\n        &mut self,\n        expected_policy_digest: [u8; 32],\n    ) -> Result<(), PlatformError> {\n        self.backend\n            .verify_process_guard(expected_policy_digest)\n            .await\n    }\n\n    /// Arms one guard and records it only after the platform operation succeeds.\n''',
+              ),
+              (
+                  '''    if store.active_session()?.is_some() {\n        return Err(ArmError::ActiveSessionExists);\n    }\n\n    let transition = SessionMachine::apply(\n''',
+                  '''    if store.active_session()?.is_some() {\n        return Err(ArmError::ActiveSessionExists);\n    }\n\n    let process_plan = session\n        .policy_snapshot()\n        .process_enforcement_plan()\n        .ok_or(ArmError::MissingProcessPolicy)?;\n\n    let transition = SessionMachine::apply(\n''',
+              ),
+              (
+                  '''    if let Err(error) = coordinator.close_blocked_apps().await {\n        return fail_arming(store, &mut coordinator, session, error).await;\n    }\n\n    for guard in REQUIRED_GUARDS {\n        if let Err(error) = coordinator.arm_guard(guard).await {\n            return fail_arming(store, &mut coordinator, session, error).await;\n        }\n    }\n    for guard in REQUIRED_GUARDS {\n        if let Err(error) = coordinator.verify_guard(guard).await {\n            return fail_arming(store, &mut coordinator, session, error).await;\n        }\n    }\n''',
+                  '''    if let Err(error) = coordinator.close_blocked_apps(&process_plan).await {\n        return fail_arming(store, &mut coordinator, session, error).await;\n    }\n    if let Err(error) = coordinator.arm_process_guard(&process_plan).await {\n        return fail_arming(store, &mut coordinator, session, error).await;\n    }\n    for guard in NON_PROCESS_GUARDS {\n        if let Err(error) = coordinator.arm_guard(guard).await {\n            return fail_arming(store, &mut coordinator, session, error).await;\n        }\n    }\n    if let Err(error) = coordinator\n        .verify_process_guard(process_plan.policy_digest())\n        .await\n    {\n        return fail_arming(store, &mut coordinator, session, error).await;\n    }\n    for guard in NON_PROCESS_GUARDS {\n        if let Err(error) = coordinator.verify_guard(guard).await {\n            return fail_arming(store, &mut coordinator, session, error).await;\n        }\n    }\n''',
+              ),
+              (
+                  '''    let session_id = active.id();\n    let state = active.state();\n    let context = transition_context(&active);\n''',
+                  '''    let session_id = active.id();\n    let state = active.state();\n    let context = transition_context(&active);\n    let process_plan = active.policy_snapshot().process_enforcement_plan();\n''',
+              ),
+              (
+                  '''    if state == SessionState::EmergencyPending {\n        if restore_all_protections(backend).await {\n''',
+                  '''    if state == SessionState::EmergencyPending {\n        if restore_all_protections(backend, process_plan.as_ref()).await {\n''',
+              ),
+              (
+                  '''    let event = if restore_all_protections(backend).await {\n''',
+                  '''    let event = if restore_all_protections(backend, process_plan.as_ref()).await {\n''',
+              ),
+              (
+                  '''async fn restore_all_protections<B: PlatformBackend>(backend: &mut B) -> bool {\n    if backend.preflight().await.is_err() || backend.close_blocked_apps().await.is_err() {\n        return false;\n    }\n    for guard in REQUIRED_GUARDS {\n        if backend.arm_guard(guard).await.is_err() {\n            return false;\n        }\n    }\n    for guard in REQUIRED_GUARDS {\n        if backend.verify_guard(guard).await.is_err() {\n            return false;\n        }\n    }\n    true\n}\n''',
+                  '''async fn restore_all_protections<B: PlatformBackend>(\n    backend: &mut B,\n    process_plan: Option<&ProcessEnforcementPlan>,\n) -> bool {\n    let Some(process_plan) = process_plan else {\n        return false;\n    };\n    if backend.preflight().await.is_err()\n        || backend.close_blocked_apps(process_plan).await.is_err()\n        || backend.arm_process_guard(process_plan).await.is_err()\n    {\n        return false;\n    }\n    for guard in NON_PROCESS_GUARDS {\n        if backend.arm_guard(guard).await.is_err() {\n            return false;\n        }\n    }\n    if backend\n        .verify_process_guard(process_plan.policy_digest())\n        .await\n        .is_err()\n    {\n        return false;\n    }\n    for guard in NON_PROCESS_GUARDS {\n        if backend.verify_guard(guard).await.is_err() {\n            return false;\n        }\n    }\n    true\n}\n''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one daemon fragment, found {count}: {old[:100]!r}")
+              text = text.replace(old, new, 1)
+
+          required_after = [
+              "LinuxEmergencyError",
+              "pub use service::{DaemonService, DaemonSnapshot, ProtectionHealth};",
+              "DaemonState::Preflight",
+              "restore_site_blocked",
+              "ProcessEnforcementPlan",
+              "MissingProcessPolicy",
+              "arm_process_guard(&process_plan)",
+              "verify_process_guard(process_plan.policy_digest())",
+          ]
+          missing = [marker for marker in required_after if marker not in text]
+          if missing:
+              raise SystemExit(f"Task 12 daemon marker missing after patch: {missing}")
+          if "REQUIRED_GUARDS" in text:
+              raise SystemExit("generic REQUIRED_GUARDS authority survived Task 12 binding")
+          path.write_text(text, encoding="utf-8")
           PY
 
-      - name: Verify restored daemon library compiles
+      - name: Verify restored daemon library and Task 12 binding
         run: |
           cargo fmt --all
           cargo check --workspace --all-targets --locked
+          cargo test -p focusd --test process_plan_binding --locked
           cargo test -p focusd --test arming_compensation --locked
+          cargo test -p focusd --test arming --locked
+          cargo test -p focusd --test recovery --locked
 
       - name: Remove one-shot workflow
         run: rm .github/workflows/restore-task12-focusd-lib.yml
@@ -55,6 +129,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bins/focusd/src/lib.rs bins/focusd/tests/arming_compensation.rs .github/workflows/restore-task12-focusd-lib.yml
-          git commit -m "fix: restore daemon library after Task 12 overwrite"
+          git add bins/focusd/src/lib.rs .github/workflows/restore-task12-focusd-lib.yml
+          git commit -m "fix: restore daemon authority and bind process policy"
           git push
