@@ -23,8 +23,8 @@ use std::{
 
 use focus_core::{
     EmergencyClockEvent, EmergencyClockSample, EmergencyDecision, EmergencyEvaluation,
-    EmergencyRequest, SessionEvent, SessionMachine, SessionState, TransitionContext,
-    TransitionError,
+    EmergencyRequest, ProcessEnforcementPlan, SessionEvent, SessionMachine, SessionState,
+    TransitionContext, TransitionError,
 };
 use focus_platform::{GuardKind, PlatformBackend, PlatformError};
 use focus_protocol::{
@@ -42,18 +42,15 @@ pub use linux_emergency::{
     LinuxEmergencyError, begin_linux_emergency_request, evaluate_linux_emergency_unlock,
 };
 
-const REQUIRED_GUARDS: [GuardKind; 4] = [
-    GuardKind::Process,
-    GuardKind::Network,
-    GuardKind::Browser,
-    GuardKind::Privilege,
-];
+const NON_PROCESS_GUARDS: [GuardKind; 3] =
+    [GuardKind::Network, GuardKind::Browser, GuardKind::Privilege];
 const IPC_READ_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Error returned while arming a protected Focus session.
 #[derive(Debug)]
 pub enum ArmError {
     ActiveSessionExists,
+    MissingProcessPolicy,
     Store(StoreError),
     Transition(TransitionError),
     Platform(PlatformError),
@@ -67,6 +64,9 @@ impl fmt::Display for ArmError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ActiveSessionExists => formatter.write_str("another Focus session is active"),
+            Self::MissingProcessPolicy => {
+                formatter.write_str("session snapshot is missing frozen process policy")
+            }
             Self::Store(error) => write!(formatter, "session store error: {error}"),
             Self::Transition(error) => write!(formatter, "session transition error: {error:?}"),
             Self::Platform(error) => write!(formatter, "platform enforcement error: {error:?}"),
@@ -85,6 +85,7 @@ impl Error for ArmError {
         match self {
             Self::Store(error) => Some(error),
             Self::ActiveSessionExists
+            | Self::MissingProcessPolicy
             | Self::Transition(_)
             | Self::Platform(_)
             | Self::ArmingFailed { .. } => None,
@@ -374,8 +375,29 @@ impl<'a, B: PlatformBackend> ArmingCoordinator<'a, B> {
         }
     }
 
-    async fn close_blocked_apps(&mut self) -> Result<(), PlatformError> {
-        self.backend.close_blocked_apps().await
+    async fn close_blocked_apps(
+        &mut self,
+        plan: &ProcessEnforcementPlan,
+    ) -> Result<(), PlatformError> {
+        self.backend.close_blocked_apps(plan).await
+    }
+
+    async fn arm_process_guard(
+        &mut self,
+        plan: &ProcessEnforcementPlan,
+    ) -> Result<(), PlatformError> {
+        self.backend.arm_process_guard(plan).await?;
+        self.applied.push(GuardKind::Process);
+        Ok(())
+    }
+
+    async fn verify_process_guard(
+        &mut self,
+        expected_policy_digest: [u8; 32],
+    ) -> Result<(), PlatformError> {
+        self.backend
+            .verify_process_guard(expected_policy_digest)
+            .await
     }
 
     /// Arms one guard and records it only after the platform operation succeeds.
@@ -457,6 +479,11 @@ where
         return Err(ArmError::ActiveSessionExists);
     }
 
+    let process_plan = session
+        .policy_snapshot()
+        .process_enforcement_plan()
+        .ok_or(ArmError::MissingProcessPolicy)?;
+
     let transition = SessionMachine::apply(
         session.state(),
         SessionEvent::ArmSucceeded,
@@ -467,16 +494,24 @@ where
     store.set_active_session(session)?;
     let mut coordinator = ArmingCoordinator::new(backend);
 
-    if let Err(error) = coordinator.close_blocked_apps().await {
+    if let Err(error) = coordinator.close_blocked_apps(&process_plan).await {
         return fail_arming(store, &mut coordinator, session, error).await;
     }
-
-    for guard in REQUIRED_GUARDS {
+    if let Err(error) = coordinator.arm_process_guard(&process_plan).await {
+        return fail_arming(store, &mut coordinator, session, error).await;
+    }
+    for guard in NON_PROCESS_GUARDS {
         if let Err(error) = coordinator.arm_guard(guard).await {
             return fail_arming(store, &mut coordinator, session, error).await;
         }
     }
-    for guard in REQUIRED_GUARDS {
+    if let Err(error) = coordinator
+        .verify_process_guard(process_plan.policy_digest())
+        .await
+    {
+        return fail_arming(store, &mut coordinator, session, error).await;
+    }
+    for guard in NON_PROCESS_GUARDS {
         if let Err(error) = coordinator.verify_guard(guard).await {
             return fail_arming(store, &mut coordinator, session, error).await;
         }
@@ -514,8 +549,10 @@ where
         return Ok(SessionState::Ending);
     }
 
+    let process_plan = active.policy_snapshot().process_enforcement_plan();
+
     if state == SessionState::EmergencyPending {
-        if restore_all_protections(backend).await {
+        if restore_all_protections(backend, process_plan.as_ref()).await {
             return Ok(SessionState::EmergencyPending);
         }
         let failed = SessionMachine::apply(state, SessionEvent::ProtectionFailed, &context)?;
@@ -532,7 +569,7 @@ where
         other => return Ok(other),
     }
 
-    let event = if restore_all_protections(backend).await {
+    let event = if restore_all_protections(backend, process_plan.as_ref()).await {
         SessionEvent::RecoverySucceeded
     } else {
         SessionEvent::ProtectionFailed
@@ -542,16 +579,32 @@ where
     Ok(final_transition.to())
 }
 
-async fn restore_all_protections<B: PlatformBackend>(backend: &mut B) -> bool {
-    if backend.preflight().await.is_err() || backend.close_blocked_apps().await.is_err() {
+async fn restore_all_protections<B: PlatformBackend>(
+    backend: &mut B,
+    process_plan: Option<&ProcessEnforcementPlan>,
+) -> bool {
+    let Some(process_plan) = process_plan else {
+        return false;
+    };
+    if backend.preflight().await.is_err()
+        || backend.close_blocked_apps(process_plan).await.is_err()
+        || backend.arm_process_guard(process_plan).await.is_err()
+    {
         return false;
     }
-    for guard in REQUIRED_GUARDS {
+    for guard in NON_PROCESS_GUARDS {
         if backend.arm_guard(guard).await.is_err() {
             return false;
         }
     }
-    for guard in REQUIRED_GUARDS {
+    if backend
+        .verify_process_guard(process_plan.policy_digest())
+        .await
+        .is_err()
+    {
+        return false;
+    }
+    for guard in NON_PROCESS_GUARDS {
         if backend.verify_guard(guard).await.is_err() {
             return false;
         }
