@@ -21,7 +21,7 @@ pub use execution_context::{
 };
 pub use execution_fact_collector::{
     ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
-    collect_execution_observation, collect_running_process,
+    collect_execution_observation, collect_running_process, enrich_execution_target_context,
 };
 pub use execution_permission::{
     ExecutionAttempt, ExecutionPermission, ExecutionPermissionChannel, ExecutionPermissionStep,

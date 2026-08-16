@@ -211,7 +211,40 @@ pub fn collect_running_process<S: LinuxExecutionFactSource>(
         .map_err(|source| source_error("executable", source))?;
     let executable = observe_executable(executable_path, ExecutionOrigin::Direct)
         .map_err(ExecutionFactCollectionError::Executable)?;
+    let executable = enrich_execution_target_context_with_lifetime(
+        source, pid, lifetime, executable, classifier,
+    )?;
 
+    Ok(RunningProcess::new(lifetime, executable))
+}
+
+/// Enriches an already-observed execution target with stable requester process context.
+///
+/// The supplied executable identity is preserved. The requester PID is used only for
+/// argv, cgroup, verified package, parent, and execution-origin context. The requester
+/// lifetime is verified before and after collection so PID reuse cannot mix identities.
+///
+/// # Errors
+///
+/// Returns an error when requester facts cannot be read or parsed, the requester or its
+/// parent changes lifetime during collection, or verified execution facts conflict.
+pub fn enrich_execution_target_context<S: LinuxExecutionFactSource>(
+    source: &S,
+    pid: u32,
+    executable: ObservedExecutable,
+    classifier: &ExecutionContextClassifier,
+) -> Result<ObservedExecutable, ExecutionFactCollectionError> {
+    let lifetime = read_process_lifetime(source, pid, "stat")?;
+    enrich_execution_target_context_with_lifetime(source, pid, lifetime, executable, classifier)
+}
+
+fn enrich_execution_target_context_with_lifetime<S: LinuxExecutionFactSource>(
+    source: &S,
+    pid: u32,
+    lifetime: ProcessLifetime,
+    executable: ObservedExecutable,
+    classifier: &ExecutionContextClassifier,
+) -> Result<ObservedExecutable, ExecutionFactCollectionError> {
     let cmdline = source
         .cmdline_bytes(pid)
         .map_err(|source| source_error("cmdline", source))?;
@@ -257,10 +290,8 @@ pub fn collect_running_process<S: LinuxExecutionFactSource>(
     }
 
     verify_process_lifetime(source, lifetime, "stat")?;
-    let executable = enrich_execution_context(executable, &facts, classifier)
-        .map_err(ExecutionFactCollectionError::Context)?;
-
-    Ok(RunningProcess::new(lifetime, executable))
+    enrich_execution_context(executable, &facts, classifier)
+        .map_err(ExecutionFactCollectionError::Context)
 }
 
 /// Collects only the executable observation for callers that do not need the process lifetime.
