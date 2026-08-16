@@ -191,7 +191,8 @@ pub fn enrich_execution_context(
             ))
             .with_origin(ExecutionOrigin::Wine);
     } else {
-        executable = executable.with_origin(generic_origin(&executable, facts, classifier));
+        let origin = generic_origin(&executable, facts, classifier);
+        executable = executable.with_origin(origin);
     }
 
     if let Some(parent) = facts.parent.clone() {
