@@ -317,8 +317,8 @@ mod tests {
     use std::os::unix::net::UnixStream as StdUnixStream;
 
     use focus_core::{
-        Decision, PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId,
-        SessionState,
+        Decision, PolicySet, PolicyVersion, ProcessPolicy, Profile, ProfileId, RecoveryCodeHash,
+        SessionId, SessionState,
     };
     use focus_platform::FakeBackend;
     use focus_protocol::{EmergencyRequestPayload, ProtocolState};
@@ -335,6 +335,7 @@ mod tests {
                 PolicyVersion(3),
                 PolicySet::new(Decision::Allow),
             )
+            .with_process_policy(ProcessPolicy::strict(Vec::new(), Vec::new()))
             .snapshot(),
             1_000,
             2_000,
