@@ -2,19 +2,20 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIOS = [
+TASK11_SCENARIOS = [
     "boot",
     "reboot",
     "suspend-resume",
     "daemon-restart",
     "multi-user",
 ]
+TASK12_SCENARIOS = ["fanotify-permission"]
 
 host = (ROOT / "tests/vm/run-qemu.sh").read_text(encoding="utf-8")
 guest = (ROOT / "tests/vm/guest-runner.sh").read_text(encoding="utf-8")
 testkit = (ROOT / "crates/focus-testkit/src/lib.rs").read_text(encoding="utf-8")
 
-for scenario in SCENARIOS:
+for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS:
     if scenario not in host:
         raise SystemExit(f"host VM runner is missing scenario {scenario}")
     if scenario not in guest:
@@ -48,6 +49,8 @@ required_guest_markers = [
     "systemctl reboot",
     "systemctl suspend",
     "FOCUS_ALLOWED_UID=0",
+    "--test fanotify_live",
+    "--ignored",
 ]
 for marker in required_guest_markers:
     if marker not in guest:
