@@ -1,8 +1,8 @@
-use focus_testkit::{LinuxVmScenario, REQUIRED_LINUX_VM_FIXTURES};
+use focus_testkit::{LinuxVmFixture, LinuxVmScenario, REQUIRED_LINUX_VM_FIXTURES};
 
 #[test]
 fn required_linux_vm_fixtures_cover_every_task11_lifecycle() {
-    let scenarios = REQUIRED_LINUX_VM_FIXTURES.map(|fixture| fixture.scenario());
+    let scenarios = REQUIRED_LINUX_VM_FIXTURES.map(LinuxVmFixture::scenario);
 
     assert_eq!(
         scenarios,
