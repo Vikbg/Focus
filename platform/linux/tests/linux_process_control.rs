@@ -4,6 +4,7 @@ use std::{
     fs, io,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use focus_core::{ExecutableMatcher, ProcessEnforcementPlan, ProcessRule};
@@ -13,6 +14,7 @@ use focus_linux::{
 };
 
 const POLICY_DIGEST: [u8; 32] = [0xB4; 32];
+static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
 
 fn stat(pid: u32, starttime: u64) -> String {
     let fields = (4_u8..=21)
@@ -23,8 +25,9 @@ fn stat(pid: u32, starttime: u64) -> String {
 }
 
 fn executable() -> PathBuf {
+    let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
-        "focus-linux-process-control-{}",
+        "focus-linux-process-control-{}-{sequence}",
         std::process::id()
     ));
     fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
@@ -132,7 +135,11 @@ fn linux_control_revalidates_proc_starttime_after_handle_open_before_termination
     let source = Source::new(
         700,
         path.clone(),
-        [Ok(stat(700, 12_345)), Ok(stat(700, 12_345)), Ok(stat(700, 12_345))],
+        [
+            Ok(stat(700, 12_345)),
+            Ok(stat(700, 12_345)),
+            Ok(stat(700, 12_345)),
+        ],
     );
     let mut control = LinuxProcessControl::new(
         source,
@@ -158,7 +165,11 @@ fn pid_reuse_after_handle_open_fails_closed_before_signal() {
     let source = Source::new(
         701,
         path.clone(),
-        [Ok(stat(701, 20_000)), Ok(stat(701, 20_000)), Ok(stat(701, 20_001))],
+        [
+            Ok(stat(701, 20_000)),
+            Ok(stat(701, 20_000)),
+            Ok(stat(701, 20_001)),
+        ],
     );
     let mut control = LinuxProcessControl::new(
         source,
