@@ -5,6 +5,7 @@ mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
 mod execution_permission;
+mod fanotify_execution_channel;
 mod linux_process_control;
 mod preflight;
 mod process_closer;
@@ -26,6 +27,10 @@ pub use execution_fact_collector::{
 pub use execution_permission::{
     ExecutionAttempt, ExecutionPermission, ExecutionPermissionChannel, ExecutionPermissionStep,
     decide_execution_permission, process_next_execution_permission,
+};
+pub use fanotify_execution_channel::{
+    FanotifyChannelHealth, FanotifyExecutionChannel, FanotifyExecutionEvent,
+    FanotifyPermissionSource,
 };
 pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
