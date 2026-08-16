@@ -8,7 +8,8 @@ use focus_core::{ExecutionOrigin, ObservedExecutable};
 
 use crate::{
     ExecutableIdentityError, ExecutionContextClassifier, ExecutionContextError,
-    LinuxExecutionFacts, enrich_execution_context, observe_executable,
+    LinuxExecutionFacts, ProcessLifetime, RunningProcess, enrich_execution_context,
+    observe_executable,
 };
 
 const PROC_ROOT: &str = "/proc";
@@ -117,6 +118,31 @@ pub enum ExecutionFactCollectionError {
     Context(ExecutionContextError),
 }
 
+impl ExecutionFactCollectionError {
+    /// Returns whether collection failed because the process disappeared from procfs.
+    #[must_use]
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::Source { source, .. } => source.kind() == io::ErrorKind::NotFound,
+            Self::Executable(ExecutableIdentityError::Io(source)) => {
+                source.kind() == io::ErrorKind::NotFound
+            }
+            Self::InvalidCmdline
+            | Self::MissingUnifiedCgroup
+            | Self::InvalidParentPid
+            | Self::InvalidProcessIdentity
+            | Self::ProcessIdentityChanged
+            | Self::InvalidFlatpakInfo
+            | Self::Executable(
+                ExecutableIdentityError::NonUtf8Path
+                | ExecutableIdentityError::NotRegularFile
+                | ExecutableIdentityError::NotExecutable,
+            )
+            | Self::Context(_) => false,
+        }
+    }
+}
+
 impl fmt::Display for ExecutionFactCollectionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -160,7 +186,7 @@ impl Error for ExecutionFactCollectionError {
     }
 }
 
-/// Collects and classifies one Linux process observation from verified OS facts.
+/// Collects one Linux process together with the lifetime verified around all execution facts.
 ///
 /// Package-looking strings in process arguments are never treated as package identity. Flatpak
 /// identity comes only from `.flatpak-info` visible inside the process root. Snap identity comes
@@ -173,12 +199,12 @@ impl Error for ExecutionFactCollectionError {
 /// Returns an error when required procfs facts cannot be read or parsed, the executable or parent
 /// identity cannot be observed safely, a process lifetime changes during collection, or verified
 /// execution facts conflict.
-pub fn collect_execution_observation<S: LinuxExecutionFactSource>(
+pub fn collect_running_process<S: LinuxExecutionFactSource>(
     source: &S,
     pid: u32,
     classifier: &ExecutionContextClassifier,
-) -> Result<ObservedExecutable, ExecutionFactCollectionError> {
-    let process_starttime = read_process_starttime(source, pid, "stat")?;
+) -> Result<RunningProcess, ExecutionFactCollectionError> {
+    let lifetime = read_process_lifetime(source, pid, "stat")?;
 
     let executable_path = source
         .executable_path(pid)
@@ -204,13 +230,13 @@ pub fn collect_execution_observation<S: LinuxExecutionFactSource>(
     let mut facts = LinuxExecutionFacts::new(argv).with_cgroup(unified_cgroup);
 
     if parent_pid != 0 {
-        let parent_starttime = read_process_starttime(source, parent_pid, "parent stat")?;
+        let parent_lifetime = read_process_lifetime(source, parent_pid, "parent stat")?;
         let parent_path = source
             .executable_path(parent_pid)
             .map_err(|source| source_error("parent executable", source))?;
         let parent = observe_executable(parent_path, ExecutionOrigin::Direct)
             .map_err(ExecutionFactCollectionError::Executable)?;
-        verify_process_starttime(source, parent_pid, parent_starttime, "parent stat")?;
+        verify_process_lifetime(source, parent_lifetime, "parent stat")?;
         facts = facts.with_parent(parent);
     }
 
@@ -230,34 +256,48 @@ pub fn collect_execution_observation<S: LinuxExecutionFactSource>(
         facts = facts.with_verified_snap_package_id(package_id);
     }
 
-    verify_process_starttime(source, pid, process_starttime, "stat")?;
+    verify_process_lifetime(source, lifetime, "stat")?;
+    let executable = enrich_execution_context(executable, &facts, classifier)
+        .map_err(ExecutionFactCollectionError::Context)?;
 
-    enrich_execution_context(executable, &facts, classifier)
-        .map_err(ExecutionFactCollectionError::Context)
+    Ok(RunningProcess::new(lifetime, executable))
+}
+
+/// Collects only the executable observation for callers that do not need the process lifetime.
+///
+/// # Errors
+///
+/// Returns the same errors as [`collect_running_process`].
+pub fn collect_execution_observation<S: LinuxExecutionFactSource>(
+    source: &S,
+    pid: u32,
+    classifier: &ExecutionContextClassifier,
+) -> Result<ObservedExecutable, ExecutionFactCollectionError> {
+    collect_running_process(source, pid, classifier).map(|process| process.executable().clone())
 }
 
 fn source_error(field: &'static str, source: io::Error) -> ExecutionFactCollectionError {
     ExecutionFactCollectionError::Source { field, source }
 }
 
-fn read_process_starttime<S: LinuxExecutionFactSource>(
+pub(crate) fn read_process_lifetime<S: LinuxExecutionFactSource>(
     source: &S,
     pid: u32,
     field: &'static str,
-) -> Result<u64, ExecutionFactCollectionError> {
+) -> Result<ProcessLifetime, ExecutionFactCollectionError> {
     let stat = source
         .stat_text(pid)
         .map_err(|source| source_error(field, source))?;
-    parse_process_starttime(pid, &stat)
+    let starttime = parse_process_starttime(pid, &stat)?;
+    Ok(ProcessLifetime::new(pid, starttime))
 }
 
-fn verify_process_starttime<S: LinuxExecutionFactSource>(
+fn verify_process_lifetime<S: LinuxExecutionFactSource>(
     source: &S,
-    pid: u32,
-    expected: u64,
+    expected: ProcessLifetime,
     field: &'static str,
 ) -> Result<(), ExecutionFactCollectionError> {
-    let current = read_process_starttime(source, pid, field)?;
+    let current = read_process_lifetime(source, expected.pid(), field)?;
     if current == expected {
         Ok(())
     } else {
