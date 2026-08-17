@@ -103,21 +103,18 @@ fn install_service_fixture() {
     .unwrap();
     assert!(command_status("systemctl", &["daemon-reload"]));
     assert!(command_status("systemctl", &["start", "focusd"]));
-    assert!(command_status("systemctl", &["is-active", "--quiet", "focusd"]));
+    assert!(command_status(
+        "systemctl",
+        &["is-active", "--quiet", "focusd"]
+    ));
 }
 
 fn install_nft_fixture() {
     let _ = Command::new("nft")
         .args(["delete", "table", "inet", NFT_TABLE])
         .status();
-    assert!(command_status(
-        "nft",
-        &["add", "table", "inet", NFT_TABLE]
-    ));
-    assert!(command_status(
-        "nft",
-        &["list", "table", "inet", NFT_TABLE]
-    ));
+    assert!(command_status("nft", &["add", "table", "inet", NFT_TABLE]));
+    assert!(command_status("nft", &["list", "table", "inet", NFT_TABLE]));
 }
 
 struct VmFixture {
@@ -128,7 +125,14 @@ struct VmFixture {
 impl VmFixture {
     fn new() -> Self {
         for command in [
-            "id", "nft", "python3", "runuser", "sudo", "systemctl", "useradd", "userdel",
+            "id",
+            "nft",
+            "python3",
+            "runuser",
+            "sudo",
+            "systemctl",
+            "useradd",
+            "userdel",
             "visudo",
         ] {
             require_command(command);
@@ -186,13 +190,16 @@ fn assert_required_bypasses_are_blocked() {
         "/var/tmp/focus-task21-sh",
         "/var/tmp/focus-task21-python",
     ] {
-        assert!(!Path::new(marker).exists(), "blocked sudo command created {marker}");
+        assert!(
+            !Path::new(marker).exists(),
+            "blocked sudo command created {marker}"
+        );
     }
-    assert!(command_status("systemctl", &["is-active", "--quiet", "focusd"]));
     assert!(command_status(
-        "nft",
-        &["list", "table", "inet", NFT_TABLE]
+        "systemctl",
+        &["is-active", "--quiet", "focusd"]
     ));
+    assert!(command_status("nft", &["list", "table", "inet", NFT_TABLE]));
 }
 
 #[test]
