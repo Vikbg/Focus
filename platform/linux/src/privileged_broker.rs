@@ -28,6 +28,16 @@ pub trait PrivilegeBrokerControl {
     fn execute(&mut self, action: PrivilegedAction) -> Result<(), PrivilegeBrokerError>;
 }
 
+/// Fail-closed broker used whenever typed privileged actions are not explicitly wired.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FailClosedPrivilegeBroker;
+
+impl PrivilegeBrokerControl for FailClosedPrivilegeBroker {
+    fn execute(&mut self, _action: PrivilegedAction) -> Result<(), PrivilegeBrokerError> {
+        Err(PrivilegeBrokerError::UnsafeExecutor)
+    }
+}
+
 /// Narrow Docker service-control dependency used by the typed broker.
 pub trait DockerServiceControl {
     /// Returns whether the fixed production executor is trusted for privileged use.
