@@ -47,7 +47,8 @@ pub use process_closer::{
     close_blocked_processes,
 };
 pub use process_guard::{
-    FailClosedProcessGuard, ProcessGuardControl, ProcessGuardError, ProductionProcessGuard,
+    FailClosedProcessGuard, ProcessGuardControl, ProcessGuardError, ProcessGuardMetrics,
+    ProductionProcessGuard,
 };
 pub use rustix_pidfd::RustixPidfdOps;
 
