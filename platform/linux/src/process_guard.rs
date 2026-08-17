@@ -258,8 +258,7 @@ impl ProcessGuardControl for ProductionProcessGuard {
                 let mut next_watchdog = Instant::now() + WATCHDOG_INTERVAL;
 
                 while !worker_stop_requested.load(Ordering::Acquire) {
-                    let Ok(step) =
-                        process_next_execution_permission(&mut channel, &frozen_plan)
+                    let Ok(step) = process_next_execution_permission(&mut channel, &frozen_plan)
                     else {
                         worker_healthy.store(false, Ordering::Release);
                         break;
