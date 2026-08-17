@@ -1,6 +1,5 @@
 const PRIVILEGE_DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
-const REQUIRED_PAM_ACCOUNT_RULE: &str =
-    "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
+const REQUIRED_PAM_ACCOUNT_RULE: &str = "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
 
 /// Production privilege-restriction guard scoped to one protected effective UID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
