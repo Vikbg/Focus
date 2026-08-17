@@ -63,6 +63,7 @@ pub struct FanotifyExecutionChannel<S, F> {
     classifier: ExecutionContextClassifier,
     health: FanotifyChannelHealth,
     awaiting_response: bool,
+    enforced_uid: Option<u32>,
 }
 
 impl<S, F> FanotifyExecutionChannel<S, F> {
@@ -75,6 +76,25 @@ impl<S, F> FanotifyExecutionChannel<S, F> {
             classifier,
             health: FanotifyChannelHealth::Healthy,
             awaiting_response: false,
+            enforced_uid: None,
+        }
+    }
+
+    /// Creates a healthy channel that enforces policy only for one effective requester UID.
+    #[must_use]
+    pub const fn for_uid(
+        source: S,
+        facts: F,
+        classifier: ExecutionContextClassifier,
+        enforced_uid: u32,
+    ) -> Self {
+        Self {
+            source,
+            facts,
+            classifier,
+            health: FanotifyChannelHealth::Healthy,
+            awaiting_response: false,
+            enforced_uid: Some(enforced_uid),
         }
     }
 
@@ -114,29 +134,53 @@ where
             ));
         }
 
-        let event = match self.source.next_event() {
-            Ok(Some(event)) => event,
-            Ok(None) => return Ok(None),
-            Err(error) => return self.fail(error),
-        };
-        self.awaiting_response = true;
+        loop {
+            let event = match self.source.next_event() {
+                Ok(Some(event)) => event,
+                Ok(None) => return Ok(None),
+                Err(error) => return self.fail(error),
+            };
+            self.awaiting_response = true;
 
-        let observed = observe_open_executable(event.target.as_fd(), ExecutionOrigin::Direct)
-            .ok()
-            .and_then(|target| {
-                enrich_execution_target_context(
-                    &self.facts,
-                    event.requester_pid,
-                    target,
-                    &self.classifier,
-                )
+            if let Some(enforced_uid) = self.enforced_uid {
+                let requester_uid = self
+                    .facts
+                    .status_text(event.requester_pid)
+                    .ok()
+                    .and_then(|status| parse_effective_uid(&status));
+
+                match requester_uid {
+                    Some(requester_uid) if requester_uid != enforced_uid => {
+                        match self.source.respond(ExecutionPermission::Allow) {
+                            Ok(()) => {
+                                self.awaiting_response = false;
+                                continue;
+                            }
+                            Err(error) => return self.fail(error),
+                        }
+                    }
+                    None => return Ok(Some(ExecutionAttempt::Unclassifiable)),
+                    Some(_) => {}
+                }
+            }
+
+            let observed = observe_open_executable(event.target.as_fd(), ExecutionOrigin::Direct)
                 .ok()
-            });
+                .and_then(|target| {
+                    enrich_execution_target_context(
+                        &self.facts,
+                        event.requester_pid,
+                        target,
+                        &self.classifier,
+                    )
+                    .ok()
+                });
 
-        Ok(Some(match observed {
-            Some(executable) => ExecutionAttempt::Observed(executable),
-            None => ExecutionAttempt::Unclassifiable,
-        }))
+            return Ok(Some(match observed {
+                Some(executable) => ExecutionAttempt::Observed(executable),
+                None => ExecutionAttempt::Unclassifiable,
+            }));
+        }
     }
 
     fn respond(&mut self, permission: ExecutionPermission) -> io::Result<()> {
@@ -157,4 +201,11 @@ where
             Err(error) => self.fail(error),
         }
     }
+}
+
+fn parse_effective_uid(status: &str) -> Option<u32> {
+    status.lines().find_map(|line| {
+        let values = line.strip_prefix("Uid:")?;
+        values.split_whitespace().nth(1)?.parse::<u32>().ok()
+    })
 }
