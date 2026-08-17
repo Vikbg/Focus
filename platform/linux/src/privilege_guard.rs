@@ -126,11 +126,20 @@ fn safe_owned_directory(path: &Path, owner_uid: u32) -> io::Result<bool> {
 }
 
 fn pam_rule_present(content: &str) -> bool {
-    content.lines().any(|line| {
+    for line in content.lines() {
         let trimmed = line.trim();
-        !trimmed.starts_with('#')
-            && trimmed.split_whitespace().collect::<Vec<_>>().join(" ") == REQUIRED_PAM_ACCOUNT_RULE
-    })
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let normalized = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized == REQUIRED_PAM_ACCOUNT_RULE {
+            return true;
+        }
+        if normalized.starts_with("account ") || normalized.starts_with("@include ") {
+            return false;
+        }
+    }
+    false
 }
 
 fn validate_pam_configuration(
