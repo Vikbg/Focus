@@ -11,6 +11,7 @@ pub enum LinuxVmScenario {
     DaemonRestart,
     MultiUser,
     FanotifyPermission,
+    PrivilegeGate,
 }
 
 /// Metadata consumed by the disposable Linux VM harness.
@@ -96,6 +97,15 @@ pub const REQUIRED_LINUX_VM_FIXTURES: [LinuxVmFixture; 5] = [
 pub const PROCESS_ENFORCEMENT_VM_FIXTURES: [LinuxVmFixture; 1] = [LinuxVmFixture::new(
     LinuxVmScenario::FanotifyPermission,
     "fanotify-permission",
+    false,
+    false,
+    1,
+)];
+
+/// Task 21 privilege-restriction security-gate fixtures.
+pub const PRIVILEGE_ENFORCEMENT_VM_FIXTURES: [LinuxVmFixture; 1] = [LinuxVmFixture::new(
+    LinuxVmScenario::PrivilegeGate,
+    "privilege-gate",
     false,
     false,
     1,
