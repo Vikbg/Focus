@@ -129,6 +129,14 @@ mod tests {
     }
 
     #[test]
+    fn protected_users_setuid_root_process_is_rejected_when_login_uid_is_unset() {
+        let fixture = ProcFixture::new();
+        fixture.add_process(106, 1000, 0, u32::MAX);
+
+        assert!(reject_existing_privileged_sessions_at(&fixture.root, 1000).is_err());
+    }
+
+    #[test]
     fn unrelated_system_root_process_is_not_attributed_to_protected_user() {
         let fixture = ProcFixture::new();
         fixture.add_process(102, 0, 0, u32::MAX);
