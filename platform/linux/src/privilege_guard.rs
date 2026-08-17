@@ -310,7 +310,7 @@ mod tests {
 
     use super::{
         PrivilegeGuardError, PrivilegeGuardPaths, REQUIRED_PAM_ACCOUNT_RULE, arm_at_paths,
-        disarm_at_paths, verify_at_paths,
+        arm_at_paths_with_session_scan, disarm_at_paths, verify_at_paths,
     };
 
     struct Fixture {
@@ -390,6 +390,35 @@ mod tests {
                 .mode()
                 & 0o777,
             0o600
+        );
+    }
+
+    #[test]
+    fn existing_privileged_session_fails_arm_after_deny_list_is_applied() {
+        let fixture = Fixture::new();
+        let proc_root = fixture.root.join("proc");
+        let process = proc_root.join("101");
+        fs::create_dir_all(&process).unwrap();
+        fs::write(
+            process.join("status"),
+            "Name:\tfixture\nUid:\t0\t0\t0\t0\n",
+        )
+        .unwrap();
+        fs::write(process.join("loginuid"), "1000\n").unwrap();
+
+        assert_eq!(
+            arm_at_paths_with_session_scan(
+                fixture.paths(),
+                fixture.owner_uid,
+                "focus-user",
+                &proc_root,
+                1000,
+            ),
+            Err(PrivilegeGuardError::ExistingPrivilegedSession)
+        );
+        assert_eq!(
+            fs::read_to_string(&fixture.deny_list).unwrap(),
+            "focus-user\n"
         );
     }
 
