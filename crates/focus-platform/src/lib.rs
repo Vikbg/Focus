@@ -109,10 +109,7 @@ pub trait PlatformBackend {
     ///
     /// The default is fail-closed. The typed action contains no arbitrary command, argument vector,
     /// or filesystem-write payload.
-    fn execute_privileged_action(
-        &mut self,
-        action: PrivilegedAction,
-    ) -> PlatformFuture<'_, ()> {
+    fn execute_privileged_action(&mut self, action: PrivilegedAction) -> PlatformFuture<'_, ()> {
         Box::pin(async move { Err(PlatformError::PrivilegedActionFailed(action)) })
     }
 }
@@ -311,10 +308,7 @@ impl PlatformBackend for FakeBackend {
         })
     }
 
-    fn execute_privileged_action(
-        &mut self,
-        action: PrivilegedAction,
-    ) -> PlatformFuture<'_, ()> {
+    fn execute_privileged_action(&mut self, action: PrivilegedAction) -> PlatformFuture<'_, ()> {
         self.privileged_actions.push(action);
         Box::pin(async { Ok(()) })
     }
