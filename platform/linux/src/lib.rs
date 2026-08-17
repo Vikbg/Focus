@@ -49,8 +49,8 @@ pub use preflight::{
 };
 pub use privilege_guard::{PrivilegeGuardControl, PrivilegeGuardError, ProductionPrivilegeGuard};
 pub use privileged_broker::{
-    DockerServiceControl, LinuxPrivilegeBroker, PrivilegeBrokerControl, PrivilegeBrokerError,
-    ProductionPrivilegeBroker, SystemctlDockerServiceControl,
+    DockerServiceControl, FailClosedPrivilegeBroker, LinuxPrivilegeBroker, PrivilegeBrokerControl,
+    PrivilegeBrokerError, ProductionPrivilegeBroker, SystemctlDockerServiceControl,
 };
 pub use process_closer::{
     ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
