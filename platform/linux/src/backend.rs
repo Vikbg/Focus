@@ -38,6 +38,23 @@ impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, Product
     }
 }
 
+impl LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGuard> {
+    /// Creates the production backend scoped to one protected effective UID.
+    #[must_use]
+    pub fn for_uid(enforced_uid: u32) -> Self {
+        Self {
+            probe: HostSystemProbe,
+            process_control: LinuxProcessControl::for_uid(
+                ProcfsExecutionFactSource,
+                RustixPidfdOps,
+                ExecutionContextClassifier::new(Vec::new()),
+                enforced_uid,
+            ),
+            process_guard: ProductionProcessGuard::for_uid(enforced_uid),
+        }
+    }
+}
+
 impl<P> LinuxBackend<P, ProductionProcessControl, FailClosedProcessGuard> {
     /// Creates a Linux backend with an explicit read-only system probe and production process
     /// control. Continuous process execution prevention remains fail-closed until an explicit
