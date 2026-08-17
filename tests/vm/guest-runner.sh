@@ -146,7 +146,6 @@ run_fanotify_permission_fixture() {
       --test fanotify_live \
       -- \
       --ignored \
-      --exact fanotify_open_exec_permission_blocks_and_allows_real_exec \
       --nocapture
 }
 
