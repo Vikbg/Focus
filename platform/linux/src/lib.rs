@@ -16,7 +16,7 @@ mod process_guard;
 mod rustix_pidfd;
 mod systemd;
 
-pub use backend::LinuxBackend;
+pub use backend::{LinuxBackend, ProductionLinuxBackend};
 pub use executable_identity::{
     ExecutableIdentityError, observe_executable, observe_open_executable,
 };
