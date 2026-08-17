@@ -2,29 +2,37 @@ use focus_core::ProcessEnforcementPlan;
 use focus_platform::{GuardKind, PlatformBackend, PlatformError, PlatformFuture};
 
 use crate::{
-    ExecutionContextClassifier, FailClosedProcessGuard, HostSystemProbe, LinuxProcessControl,
-    ProcessControl, ProcessGuardControl, ProcfsExecutionFactSource, ProductionProcessGuard,
-    RustixPidfdOps, SystemProbe, close_blocked_processes, evaluate_preflight,
-    require_strict_preflight,
+    ExecutionContextClassifier, FailClosedPrivilegeGuard, FailClosedProcessGuard, HostSystemProbe,
+    LinuxProcessControl, PrivilegeGuardControl, ProcessControl, ProcessGuardControl,
+    ProcfsExecutionFactSource, ProductionPrivilegeGuard, ProductionProcessGuard, RustixPidfdOps,
+    SystemProbe, close_blocked_processes, evaluate_preflight, require_strict_preflight,
 };
 
 /// Production process-control stack used by the Linux backend.
 pub type ProductionProcessControl = LinuxProcessControl<ProcfsExecutionFactSource, RustixPidfdOps>;
 
-/// Linux platform backend that owns strict preflight, process closure, and a typed continuous
-/// process-execution guard controller.
+/// Linux platform backend that owns strict preflight, process closure, and typed enforcement guards.
 #[derive(Debug)]
 pub struct LinuxBackend<
     P = HostSystemProbe,
     C = ProductionProcessControl,
     G = ProductionProcessGuard,
+    V = FailClosedPrivilegeGuard,
 > {
     probe: P,
     process_control: C,
     process_guard: G,
+    privilege_guard: V,
 }
 
-impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGuard> {
+impl Default
+    for LinuxBackend<
+        HostSystemProbe,
+        ProductionProcessControl,
+        ProductionProcessGuard,
+        FailClosedPrivilegeGuard,
+    >
+{
     fn default() -> Self {
         Self {
             probe: HostSystemProbe,
@@ -34,11 +42,19 @@ impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, Product
                 ExecutionContextClassifier::new(Vec::new()),
             ),
             process_guard: ProductionProcessGuard::default(),
+            privilege_guard: FailClosedPrivilegeGuard,
         }
     }
 }
 
-impl LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGuard> {
+impl
+    LinuxBackend<
+        HostSystemProbe,
+        ProductionProcessControl,
+        ProductionProcessGuard,
+        ProductionPrivilegeGuard,
+    >
+{
     /// Creates the production backend scoped to one protected effective UID.
     #[must_use]
     pub fn for_uid(enforced_uid: u32) -> Self {
@@ -51,14 +67,22 @@ impl LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGu
                 enforced_uid,
             ),
             process_guard: ProductionProcessGuard::for_uid(enforced_uid),
+            privilege_guard: ProductionPrivilegeGuard::for_uid(enforced_uid),
         }
     }
 }
 
-impl<P> LinuxBackend<P, ProductionProcessControl, FailClosedProcessGuard> {
+impl<P>
+    LinuxBackend<
+        P,
+        ProductionProcessControl,
+        FailClosedProcessGuard,
+        FailClosedPrivilegeGuard,
+    >
+{
     /// Creates a Linux backend with an explicit read-only system probe and production process
-    /// control. Continuous process execution prevention remains fail-closed until an explicit
-    /// process guard controller is supplied.
+    /// control. Process and privilege enforcement remain fail-closed until explicit controllers are
+    /// supplied.
     #[must_use]
     pub fn with_probe(probe: P) -> Self {
         Self {
@@ -69,26 +93,28 @@ impl<P> LinuxBackend<P, ProductionProcessControl, FailClosedProcessGuard> {
                 ExecutionContextClassifier::new(Vec::new()),
             ),
             process_guard: FailClosedProcessGuard,
+            privilege_guard: FailClosedPrivilegeGuard,
         }
     }
 }
 
-impl<P, C> LinuxBackend<P, C, FailClosedProcessGuard> {
+impl<P, C> LinuxBackend<P, C, FailClosedProcessGuard, FailClosedPrivilegeGuard> {
     /// Creates a Linux backend with explicit read-only system and process-control dependencies.
-    /// Continuous process execution prevention remains fail-closed.
+    /// Process and privilege enforcement remain fail-closed.
     #[must_use]
     pub const fn with_probe_and_process_control(probe: P, process_control: C) -> Self {
         Self {
             probe,
             process_control,
             process_guard: FailClosedProcessGuard,
+            privilege_guard: FailClosedPrivilegeGuard,
         }
     }
 }
 
-impl<P, C, G> LinuxBackend<P, C, G> {
+impl<P, C, G> LinuxBackend<P, C, G, FailClosedPrivilegeGuard> {
     /// Creates a Linux backend with explicit system, process-control, and process-guard
-    /// dependencies.
+    /// dependencies. Privilege enforcement remains fail-closed.
     #[must_use]
     pub const fn with_probe_process_control_and_guard(
         probe: P,
@@ -99,6 +125,26 @@ impl<P, C, G> LinuxBackend<P, C, G> {
             probe,
             process_control,
             process_guard,
+            privilege_guard: FailClosedPrivilegeGuard,
+        }
+    }
+}
+
+impl<P, C, G, V> LinuxBackend<P, C, G, V> {
+    /// Creates a Linux backend with explicit system, process-control, process-guard, and privilege
+    /// guard dependencies.
+    #[must_use]
+    pub const fn with_controls(
+        probe: P,
+        process_control: C,
+        process_guard: G,
+        privilege_guard: V,
+    ) -> Self {
+        Self {
+            probe,
+            process_control,
+            process_guard,
+            privilege_guard,
         }
     }
 
@@ -119,13 +165,26 @@ impl<P, C, G> LinuxBackend<P, C, G> {
     pub const fn process_guard_mut(&mut self) -> &mut G {
         &mut self.process_guard
     }
+
+    /// Returns the privilege-guard dependency for diagnostics and deterministic tests.
+    #[must_use]
+    pub const fn privilege_guard(&self) -> &V {
+        &self.privilege_guard
+    }
+
+    /// Returns mutable access to the privilege-guard dependency for deterministic health tests.
+    #[must_use]
+    pub const fn privilege_guard_mut(&mut self) -> &mut V {
+        &mut self.privilege_guard
+    }
 }
 
-impl<P, C, G> PlatformBackend for LinuxBackend<P, C, G>
+impl<P, C, G, V> PlatformBackend for LinuxBackend<P, C, G, V>
 where
     P: SystemProbe,
     C: ProcessControl,
     G: ProcessGuardControl,
+    V: PrivilegeGuardControl,
 {
     fn preflight(&mut self) -> PlatformFuture<'_, ()> {
         let result = evaluate_preflight(&self.probe)
