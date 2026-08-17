@@ -83,7 +83,7 @@ run_daemon_restart_fixture() {
     FOCUS_DB_PATH="$database" \
     FOCUS_SOCKET_PATH="$socket" \
     FOCUS_ALLOWED_UID=0 \
-    FOCUS_CLI_EXECUTABLE="$focusctl_bin" \
+    FOCUS_CLI_PATH="$focusctl_bin" \
       "$focusd_bin" >>"$state_dir/focusd.log" 2>&1 &
     daemon_pid=$!
     wait_for_socket "$socket"
