@@ -71,15 +71,21 @@ fn safe_identity(identity: &str) -> bool {
             .any(|character| matches!(character, '\n' | '\r' | '\0'))
 }
 
-fn safe_owned_regular_file(path: &Path, owner_uid: u32, exact_mode: Option<u32>) -> io::Result<bool> {
+fn safe_owned_regular_file(
+    path: &Path,
+    owner_uid: u32,
+    exact_mode: Option<u32>,
+) -> io::Result<bool> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.uid() != owner_uid {
         return Ok(false);
     }
     let mode = metadata.permissions().mode() & 0o777;
-    Ok(exact_mode.map_or(mode & WRITEABLE_BY_NON_OWNER == 0, |expected| {
-        mode == expected
-    }))
+    Ok(
+        exact_mode.map_or(mode & WRITEABLE_BY_NON_OWNER == 0, |expected| {
+            mode == expected
+        }),
+    )
 }
 
 fn safe_owned_directory(path: &Path, owner_uid: u32) -> io::Result<bool> {
@@ -94,8 +100,7 @@ fn pam_rule_present(content: &str) -> bool {
     content.lines().any(|line| {
         let trimmed = line.trim();
         !trimmed.starts_with('#')
-            && trimmed.split_whitespace().collect::<Vec<_>>().join(" ")
-                == REQUIRED_PAM_ACCOUNT_RULE
+            && trimmed.split_whitespace().collect::<Vec<_>>().join(" ") == REQUIRED_PAM_ACCOUNT_RULE
     })
 }
 
@@ -344,14 +349,21 @@ mod tests {
         let paths = fixture.paths();
 
         arm_at_paths(paths, fixture.owner_uid, "focus-user").unwrap();
-        assert_eq!(fs::read_to_string(&fixture.deny_list).unwrap(), "focus-user\n");
+        assert_eq!(
+            fs::read_to_string(&fixture.deny_list).unwrap(),
+            "focus-user\n"
+        );
         verify_at_paths(paths, fixture.owner_uid, "focus-user").unwrap();
 
         disarm_at_paths(paths, fixture.owner_uid).unwrap();
         disarm_at_paths(paths, fixture.owner_uid).unwrap();
         assert_eq!(fs::read_to_string(&fixture.deny_list).unwrap(), "");
         assert_eq!(
-            fs::metadata(&fixture.deny_list).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&fixture.deny_list)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
             0o600
         );
     }
