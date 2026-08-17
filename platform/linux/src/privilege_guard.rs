@@ -6,9 +6,13 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use nix::unistd::{Uid, User};
+
+const PAM_CONFIG_PATH: &str = "/etc/pam.d/sudo";
 const PRIVILEGE_DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
 const REQUIRED_PAM_ACCOUNT_RULE: &str = "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
 const SAFE_FILE_WRITE_MODE: u32 = 0o600;
+const SYSTEM_OWNER_UID: u32 = 0;
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -31,14 +35,16 @@ pub trait PrivilegeGuardControl {
     ///
     /// # Errors
     ///
-    /// Returns an error until the required PAM policy and deny-list can be applied safely.
+    /// Returns an error when the protected user cannot be resolved or the required PAM policy and
+    /// deny-list cannot be applied safely.
     fn arm(&mut self) -> Result<(), PrivilegeGuardError>;
 
     /// Verifies that the privilege restriction remains active and healthy.
     ///
     /// # Errors
     ///
-    /// Returns an error while no verified production restriction is active.
+    /// Returns an error when the protected user cannot be resolved or the PAM policy and deny-list
+    /// no longer match the armed restriction.
     fn verify(&mut self) -> Result<(), PrivilegeGuardError>;
 
     /// Removes the privilege restriction. The operation must be idempotent.
@@ -64,11 +70,28 @@ impl<'a> PrivilegeGuardPaths<'a> {
     }
 }
 
+fn production_paths() -> PrivilegeGuardPaths<'static> {
+    PrivilegeGuardPaths::new(
+        Path::new(PAM_CONFIG_PATH),
+        Path::new(PRIVILEGE_DENY_LIST_PATH),
+    )
+}
+
 fn safe_identity(identity: &str) -> bool {
     !identity.is_empty()
         && !identity
             .chars()
             .any(|character| matches!(character, '\n' | '\r' | '\0'))
+}
+
+fn resolve_username(uid: u32) -> Result<String, PrivilegeGuardError> {
+    let user = User::from_uid(Uid::from_raw(uid))
+        .map_err(|_| PrivilegeGuardError::Unavailable)?
+        .ok_or(PrivilegeGuardError::InvalidUserIdentity)?;
+    if !safe_identity(&user.name) {
+        return Err(PrivilegeGuardError::InvalidUserIdentity);
+    }
+    Ok(user.name)
 }
 
 fn safe_owned_regular_file(
@@ -262,15 +285,17 @@ impl ProductionPrivilegeGuard {
 
 impl PrivilegeGuardControl for ProductionPrivilegeGuard {
     fn arm(&mut self) -> Result<(), PrivilegeGuardError> {
-        Err(PrivilegeGuardError::Unavailable)
+        let username = resolve_username(self.enforced_uid)?;
+        arm_at_paths(production_paths(), SYSTEM_OWNER_UID, &username)
     }
 
     fn verify(&mut self) -> Result<(), PrivilegeGuardError> {
-        Err(PrivilegeGuardError::Unhealthy)
+        let username = resolve_username(self.enforced_uid)?;
+        verify_at_paths(production_paths(), SYSTEM_OWNER_UID, &username)
     }
 
     fn disarm(&mut self) -> Result<(), PrivilegeGuardError> {
-        Ok(())
+        disarm_at_paths(production_paths(), SYSTEM_OWNER_UID)
     }
 }
 
