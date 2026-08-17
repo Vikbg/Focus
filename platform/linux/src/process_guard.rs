@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -78,6 +78,86 @@ fn wait_for_process_guard_wake(
             }
             Err(Errno::EINTR) => {}
             Err(error) => return Err(io::Error::from_raw_os_error(error as i32)),
+        }
+    }
+}
+
+/// Snapshot of process-guard performance measurements for the current arm cycle.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessGuardMetrics {
+    permission_decisions: u64,
+    total_decision_latency_nanos: u64,
+    max_decision_latency_nanos: u64,
+    watchdog_wakeups: u64,
+}
+
+impl ProcessGuardMetrics {
+    /// Returns the number of non-idle permission decisions completed by the worker.
+    #[must_use]
+    pub const fn permission_decisions(self) -> u64 {
+        self.permission_decisions
+    }
+
+    /// Returns the accumulated worker-side permission decision latency.
+    #[must_use]
+    pub const fn total_decision_latency(self) -> Duration {
+        Duration::from_nanos(self.total_decision_latency_nanos)
+    }
+
+    /// Returns the largest worker-side permission decision latency observed so far.
+    #[must_use]
+    pub const fn max_decision_latency(self) -> Duration {
+        Duration::from_nanos(self.max_decision_latency_nanos)
+    }
+
+    /// Returns the average worker-side permission decision latency when at least one decision ran.
+    #[must_use]
+    pub fn average_decision_latency(self) -> Option<Duration> {
+        if self.permission_decisions == 0 {
+            return None;
+        }
+        Some(Duration::from_nanos(
+            self.total_decision_latency_nanos / self.permission_decisions,
+        ))
+    }
+
+    /// Returns the number of idle watchdog deadline wakeups observed by the worker.
+    #[must_use]
+    pub const fn watchdog_wakeups(self) -> u64 {
+        self.watchdog_wakeups
+    }
+}
+
+#[derive(Debug, Default)]
+struct ProcessGuardMetricCounters {
+    permission_decisions: AtomicU64,
+    total_decision_latency_nanos: AtomicU64,
+    max_decision_latency_nanos: AtomicU64,
+    watchdog_wakeups: AtomicU64,
+}
+
+impl ProcessGuardMetricCounters {
+    fn record_decision(&self, latency: Duration) {
+        let latency_nanos = u64::try_from(latency.as_nanos()).unwrap_or(u64::MAX);
+        self.permission_decisions.fetch_add(1, Ordering::Relaxed);
+        self.total_decision_latency_nanos
+            .fetch_add(latency_nanos, Ordering::Relaxed);
+        self.max_decision_latency_nanos
+            .fetch_max(latency_nanos, Ordering::Relaxed);
+    }
+
+    fn record_watchdog_wakeup(&self) {
+        self.watchdog_wakeups.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> ProcessGuardMetrics {
+        ProcessGuardMetrics {
+            permission_decisions: self.permission_decisions.load(Ordering::Relaxed),
+            total_decision_latency_nanos: self
+                .total_decision_latency_nanos
+                .load(Ordering::Relaxed),
+            max_decision_latency_nanos: self.max_decision_latency_nanos.load(Ordering::Relaxed),
+            watchdog_wakeups: self.watchdog_wakeups.load(Ordering::Relaxed),
         }
     }
 }
@@ -164,6 +244,7 @@ impl ProcessGuardWorker {
 pub struct ProductionProcessGuard {
     mounts: Vec<PathBuf>,
     enforced_uid: Option<u32>,
+    metrics: Arc<ProcessGuardMetricCounters>,
     worker: Option<ProcessGuardWorker>,
 }
 
@@ -172,6 +253,7 @@ impl Default for ProductionProcessGuard {
         Self {
             mounts: vec![PathBuf::from("/")],
             enforced_uid: None,
+            metrics: Arc::new(ProcessGuardMetricCounters::default()),
             worker: None,
         }
     }
@@ -192,6 +274,7 @@ impl ProductionProcessGuard {
         Self {
             mounts: mounts.into_iter().map(Into::into).collect(),
             enforced_uid: None,
+            metrics: Arc::new(ProcessGuardMetricCounters::default()),
             worker: None,
         }
     }
@@ -202,6 +285,7 @@ impl ProductionProcessGuard {
         Self {
             mounts: vec![PathBuf::from("/")],
             enforced_uid: Some(enforced_uid),
+            metrics: Arc::new(ProcessGuardMetricCounters::default()),
             worker: None,
         }
     }
@@ -210,6 +294,12 @@ impl ProductionProcessGuard {
     #[must_use]
     pub const fn enforced_uid(&self) -> Option<u32> {
         self.enforced_uid
+    }
+
+    /// Returns a lock-free snapshot of the current arm cycle performance measurements.
+    #[must_use]
+    pub fn metrics(&self) -> ProcessGuardMetrics {
+        self.metrics.snapshot()
     }
 
     fn execution_channel(
@@ -296,9 +386,12 @@ impl ProcessGuardControl for ProductionProcessGuard {
             EventFd::from_flags(EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
                 .map_err(|_| ProcessGuardError::Unavailable)?,
         );
+        let metrics = Arc::new(ProcessGuardMetricCounters::default());
+        self.metrics = Arc::clone(&metrics);
         let worker_healthy = Arc::clone(&healthy);
         let worker_stop_requested = Arc::clone(&stop_requested);
         let worker_stop_event = Arc::clone(&stop_event);
+        let worker_metrics = Arc::clone(&metrics);
 
         let handle = thread::Builder::new()
             .name("focus-process-guard".to_owned())
@@ -306,11 +399,15 @@ impl ProcessGuardControl for ProductionProcessGuard {
                 let mut next_watchdog = Instant::now() + WATCHDOG_INTERVAL;
 
                 while !worker_stop_requested.load(Ordering::Acquire) {
+                    let decision_started = Instant::now();
                     let Ok(step) = process_next_execution_permission(&mut channel, &frozen_plan)
                     else {
                         worker_healthy.store(false, Ordering::Release);
                         break;
                     };
+                    if step != crate::ExecutionPermissionStep::Idle {
+                        worker_metrics.record_decision(decision_started.elapsed());
+                    }
 
                     if Instant::now() >= next_watchdog {
                         if close_blocked_processes(&mut watchdog_control, &frozen_plan).is_err() {
@@ -330,6 +427,7 @@ impl ProcessGuardControl for ProductionProcessGuard {
                             Ok(ProcessGuardWake::Permission) => {}
                             Ok(ProcessGuardWake::Stop) => break,
                             Ok(ProcessGuardWake::Watchdog) => {
+                                worker_metrics.record_watchdog_wakeup();
                                 if close_blocked_processes(&mut watchdog_control, &frozen_plan)
                                     .is_err()
                                 {
@@ -383,7 +481,10 @@ impl Drop for ProductionProcessGuard {
 mod tests {
     use std::{io::Write, os::fd::AsFd, os::unix::net::UnixStream, time::Duration};
 
-    use super::{ProcessGuardWake, wait_for_process_guard_wake};
+    use super::{
+        ProcessGuardMetricCounters, ProcessGuardMetrics, ProcessGuardWake,
+        wait_for_process_guard_wake,
+    };
 
     #[test]
     fn event_wait_wakes_when_permission_fd_becomes_readable() {
@@ -433,5 +534,24 @@ mod tests {
             .unwrap(),
             ProcessGuardWake::Watchdog
         );
+    }
+
+    #[test]
+    fn metric_counters_accumulate_decisions_and_watchdog_wakeups() {
+        let counters = ProcessGuardMetricCounters::default();
+        counters.record_decision(Duration::from_millis(2));
+        counters.record_decision(Duration::from_millis(4));
+        counters.record_watchdog_wakeup();
+
+        let metrics = counters.snapshot();
+        assert_eq!(metrics.permission_decisions(), 2);
+        assert_eq!(metrics.total_decision_latency(), Duration::from_millis(6));
+        assert_eq!(metrics.max_decision_latency(), Duration::from_millis(4));
+        assert_eq!(
+            metrics.average_decision_latency(),
+            Some(Duration::from_millis(3))
+        );
+        assert_eq!(metrics.watchdog_wakeups(), 1);
+        assert_ne!(metrics, ProcessGuardMetrics::default());
     }
 }
