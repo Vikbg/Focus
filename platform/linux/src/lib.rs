@@ -43,7 +43,7 @@ pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
 };
-pub use privilege_guard::ProductionPrivilegeGuard;
+pub use privilege_guard::{PrivilegeGuardControl, PrivilegeGuardError, ProductionPrivilegeGuard};
 pub use process_closer::{
     ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
     close_blocked_processes,
