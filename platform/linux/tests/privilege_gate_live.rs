@@ -248,6 +248,16 @@ fn assert_typed_broker_still_succeeds(protected_uid: u32) {
 }
 
 #[test]
+fn fixture_pam_rule_precedes_sufficient_account_modules() {
+    let original = "#%PAM-1.0\naccount sufficient pam_permit.so\n@include common-auth\n";
+    let configured = pam_with_required_account_rule(original);
+    let focus_rule = configured.find(PAM_RULE).unwrap();
+    let sufficient_rule = configured.find("account sufficient pam_permit.so").unwrap();
+
+    assert!(focus_rule < sufficient_rule);
+}
+
+#[test]
 #[ignore = "requires disposable root VM with sudo and PAM"]
 fn privilege_gate_blocks_unrestricted_sudo_paths() {
     assert_eq!(
