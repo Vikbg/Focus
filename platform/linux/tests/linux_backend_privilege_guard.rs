@@ -5,10 +5,11 @@ use std::{
 };
 
 use focus_linux::{
-    FailClosedProcessGuard, LinuxBackend, LinuxError, PrivilegeGuardControl, PrivilegeGuardError,
-    ProcessCloseError, ProcessControl, ProcessLifetime, RunningProcess, SystemProbe,
+    FailClosedProcessGuard, LinuxBackend, LinuxError, PrivilegeBrokerControl, PrivilegeBrokerError,
+    PrivilegeGuardControl, PrivilegeGuardError, ProcessCloseError, ProcessControl, ProcessLifetime,
+    RunningProcess, SystemProbe,
 };
-use focus_platform::{GuardKind, PlatformBackend, PlatformError};
+use focus_platform::{GuardKind, PlatformBackend, PlatformError, PrivilegedAction};
 
 fn block_on_ready<F: Future>(future: F) -> F::Output {
     let waker = Waker::noop();
@@ -120,6 +121,23 @@ impl PrivilegeGuardControl for RecordingPrivilegeGuard {
     }
 }
 
+#[derive(Debug, Default)]
+struct RecordingPrivilegeBroker {
+    actions: Vec<PrivilegedAction>,
+    fail: bool,
+}
+
+impl PrivilegeBrokerControl for RecordingPrivilegeBroker {
+    fn execute(&mut self, action: PrivilegedAction) -> Result<(), PrivilegeBrokerError> {
+        self.actions.push(action);
+        if self.fail {
+            Err(PrivilegeBrokerError::ActionFailed)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 fn backend(
     privilege_guard: RecordingPrivilegeGuard,
 ) -> LinuxBackend<HealthyProbe, EmptyProcessControl, FailClosedProcessGuard, RecordingPrivilegeGuard>
@@ -129,6 +147,24 @@ fn backend(
         EmptyProcessControl,
         FailClosedProcessGuard,
         privilege_guard,
+    )
+}
+
+fn backend_with_broker(
+    privilege_broker: RecordingPrivilegeBroker,
+) -> LinuxBackend<
+    HealthyProbe,
+    EmptyProcessControl,
+    FailClosedProcessGuard,
+    RecordingPrivilegeGuard,
+    RecordingPrivilegeBroker,
+> {
+    LinuxBackend::with_controls_and_broker(
+        HealthyProbe,
+        EmptyProcessControl,
+        FailClosedProcessGuard,
+        RecordingPrivilegeGuard::default(),
+        privilege_broker,
     )
 }
 
@@ -192,5 +228,34 @@ fn privilege_guard_failures_map_to_platform_guard_failure() {
     assert_eq!(
         block_on_ready(disarm_failure.disarm_guard(GuardKind::Privilege)),
         Err(PlatformError::GuardFailed(GuardKind::Privilege))
+    );
+}
+
+#[test]
+fn typed_privileged_action_routes_to_the_broker_controller() {
+    let mut backend = backend_with_broker(RecordingPrivilegeBroker::default());
+
+    assert_eq!(
+        block_on_ready(backend.execute_privileged_action(PrivilegedAction::DockerStart)),
+        Ok(())
+    );
+    assert_eq!(
+        backend.privilege_broker().actions,
+        vec![PrivilegedAction::DockerStart]
+    );
+}
+
+#[test]
+fn privilege_broker_failure_maps_to_typed_platform_error() {
+    let mut backend = backend_with_broker(RecordingPrivilegeBroker {
+        fail: true,
+        ..RecordingPrivilegeBroker::default()
+    });
+
+    assert_eq!(
+        block_on_ready(backend.execute_privileged_action(PrivilegedAction::DockerStart)),
+        Err(PlatformError::PrivilegedActionFailed(
+            PrivilegedAction::DockerStart
+        ))
     );
 }
