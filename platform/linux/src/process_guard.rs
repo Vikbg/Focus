@@ -277,6 +277,21 @@ impl ProductionProcessGuard {
         }
     }
 
+    /// Creates a production guard over explicit mounted roots for one protected effective UID.
+    #[must_use]
+    pub fn for_mounts_and_uid<I, P>(mounts: I, enforced_uid: u32) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: Into<PathBuf>,
+    {
+        Self {
+            mounts: mounts.into_iter().map(Into::into).collect(),
+            enforced_uid: Some(enforced_uid),
+            metrics: Arc::new(ProcessGuardMetricCounters::default()),
+            worker: None,
+        }
+    }
+
     /// Creates a production guard scoped to one protected effective UID.
     #[must_use]
     pub fn for_uid(enforced_uid: u32) -> Self {
