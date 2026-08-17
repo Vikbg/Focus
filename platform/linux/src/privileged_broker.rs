@@ -102,10 +102,7 @@ impl Default for SystemctlDockerServiceControl {
 
 impl SystemctlDockerServiceControl {
     fn trusted_executor_metadata(is_file: bool, owner_uid: u32, mode: u32) -> bool {
-        is_file
-            && owner_uid == 0
-            && mode & 0o111 != 0
-            && mode & WRITEABLE_BY_NON_OWNER == 0
+        is_file && owner_uid == 0 && mode & 0o111 != 0 && mode & WRITEABLE_BY_NON_OWNER == 0
     }
 
     fn trusted_path(path: &Path) -> Result<bool, PrivilegeBrokerError> {
