@@ -219,16 +219,38 @@ where
     }
 
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
-        Box::pin(async move { Err(PlatformError::GuardFailed(guard)) })
+        let result = if guard == GuardKind::Privilege {
+            self.privilege_guard
+                .arm()
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Privilege))
+        } else {
+            Err(PlatformError::GuardFailed(guard))
+        };
+        Box::pin(async move { result })
+    }
+
+    fn verify_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        let result = if guard == GuardKind::Privilege {
+            self.privilege_guard
+                .verify()
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Privilege))
+        } else {
+            Ok(())
+        };
+        Box::pin(async move { result })
     }
 
     fn disarm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
-        let result = if guard == GuardKind::Process {
-            self.process_guard
+        let result = match guard {
+            GuardKind::Process => self
+                .process_guard
                 .disarm()
-                .map_err(|_| PlatformError::GuardFailed(GuardKind::Process))
-        } else {
-            Ok(())
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Process)),
+            GuardKind::Privilege => self
+                .privilege_guard
+                .disarm()
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Privilege)),
+            GuardKind::Network | GuardKind::Browser => Ok(()),
         };
         Box::pin(async move { result })
     }
