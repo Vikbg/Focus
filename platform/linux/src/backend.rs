@@ -3,8 +3,9 @@ use focus_platform::{GuardKind, PlatformBackend, PlatformError, PlatformFuture};
 
 use crate::{
     ExecutionContextClassifier, FailClosedProcessGuard, HostSystemProbe, LinuxProcessControl,
-    ProcessControl, ProcessGuardControl, ProcfsExecutionFactSource, RustixPidfdOps, SystemProbe,
-    close_blocked_processes, evaluate_preflight, require_strict_preflight,
+    ProcessControl, ProcessGuardControl, ProcfsExecutionFactSource, ProductionProcessGuard,
+    RustixPidfdOps, SystemProbe, close_blocked_processes, evaluate_preflight,
+    require_strict_preflight,
 };
 
 /// Production process-control stack used by the Linux backend.
@@ -16,14 +17,14 @@ pub type ProductionProcessControl = LinuxProcessControl<ProcfsExecutionFactSourc
 pub struct LinuxBackend<
     P = HostSystemProbe,
     C = ProductionProcessControl,
-    G = FailClosedProcessGuard,
+    G = ProductionProcessGuard,
 > {
     probe: P,
     process_control: C,
     process_guard: G,
 }
 
-impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, FailClosedProcessGuard> {
+impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGuard> {
     fn default() -> Self {
         Self {
             probe: HostSystemProbe,
@@ -32,7 +33,7 @@ impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, FailClo
                 RustixPidfdOps,
                 ExecutionContextClassifier::new(Vec::new()),
             ),
-            process_guard: FailClosedProcessGuard,
+            process_guard: ProductionProcessGuard::default(),
         }
     }
 }
