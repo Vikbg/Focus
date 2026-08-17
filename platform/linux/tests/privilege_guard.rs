@@ -1,6 +1,4 @@
-use focus_linux::{
-    PrivilegeGuardControl, PrivilegeGuardError, ProductionPrivilegeGuard,
-};
+use focus_linux::{PrivilegeGuardControl, PrivilegeGuardError, ProductionPrivilegeGuard};
 
 fn assert_privilege_control<T: PrivilegeGuardControl>() {}
 
