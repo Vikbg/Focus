@@ -52,7 +52,10 @@ fn wait_for_process_guard_wake(
             return Ok(ProcessGuardWake::Watchdog);
         }
         let timeout = PollTimeout::try_from(remaining).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidInput, "watchdog interval is too large")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "watchdog interval is too large",
+            )
         })?;
 
         match poll(&mut fds, timeout) {
@@ -332,12 +335,7 @@ impl Drop for ProductionProcessGuard {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::Write,
-        os::fd::AsFd,
-        os::unix::net::UnixStream,
-        time::Duration,
-    };
+    use std::{io::Write, os::fd::AsFd, os::unix::net::UnixStream, time::Duration};
 
     use super::{ProcessGuardWake, wait_for_process_guard_wake};
 
