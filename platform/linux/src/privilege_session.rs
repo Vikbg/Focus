@@ -40,7 +40,11 @@ pub(crate) fn reject_existing_privileged_sessions_at(
 
     for entry in entries {
         let entry = entry.map_err(|_| PrivilegeSessionError::InspectionFailed)?;
-        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
             continue;
         };
         let process = proc_root.join(pid.to_string());
