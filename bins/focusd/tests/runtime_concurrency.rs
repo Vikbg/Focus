@@ -184,6 +184,14 @@ async fn shutdown_never_removes_a_replacement_path() {
     });
 
     wait_for_socket(&socket).await;
+    let ready_socket = socket.clone();
+    let readiness = tokio::task::spawn_blocking(move || {
+        send_request(&ready_socket, RequestId(0x5afe), Request::GetStatus)
+    })
+    .await
+    .unwrap();
+    assert!(matches!(readiness, Response::Status(_)));
+
     fs::remove_file(&socket).unwrap();
     fs::write(&socket, b"replacement sentinel").unwrap();
 
