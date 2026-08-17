@@ -162,7 +162,10 @@ impl ProcessGuardControl for ProductionProcessGuard {
                         Ok(crate::ExecutionPermissionStep::Idle) => {
                             thread::sleep(IDLE_POLL_INTERVAL);
                         }
-                        Ok(crate::ExecutionPermissionStep::Allowed | crate::ExecutionPermissionStep::Denied) => {}
+                        Ok(
+                            crate::ExecutionPermissionStep::Allowed
+                            | crate::ExecutionPermissionStep::Denied,
+                        ) => {}
                         Err(_) => {
                             worker_healthy.store(false, Ordering::Release);
                             break;
