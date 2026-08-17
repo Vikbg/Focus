@@ -120,7 +120,10 @@ impl PrivilegeGuardControl for RecordingPrivilegeGuard {
     }
 }
 
-fn backend(privilege_guard: RecordingPrivilegeGuard) -> LinuxBackend<HealthyProbe, EmptyProcessControl, FailClosedProcessGuard, RecordingPrivilegeGuard> {
+fn backend(
+    privilege_guard: RecordingPrivilegeGuard,
+) -> LinuxBackend<HealthyProbe, EmptyProcessControl, FailClosedProcessGuard, RecordingPrivilegeGuard>
+{
     LinuxBackend::with_controls(
         HealthyProbe,
         EmptyProcessControl,
@@ -133,7 +136,10 @@ fn backend(privilege_guard: RecordingPrivilegeGuard) -> LinuxBackend<HealthyProb
 fn privilege_arm_routes_to_the_typed_guard_controller() {
     let mut backend = backend(RecordingPrivilegeGuard::default());
 
-    assert_eq!(block_on_ready(backend.arm_guard(GuardKind::Privilege)), Ok(()));
+    assert_eq!(
+        block_on_ready(backend.arm_guard(GuardKind::Privilege)),
+        Ok(())
+    );
     assert_eq!(backend.privilege_guard().arm_calls, 1);
 }
 
