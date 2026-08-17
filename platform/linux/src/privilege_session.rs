@@ -19,17 +19,23 @@ fn read_process_file(process: &Path, name: &str) -> Result<Option<String>, Privi
     }
 }
 
-fn effective_uid(status: &str) -> Result<u32, PrivilegeSessionError> {
+fn real_and_effective_uid(status: &str) -> Result<(u32, u32), PrivilegeSessionError> {
     let fields = status
         .lines()
         .find_map(|line| line.strip_prefix("Uid:"))
         .ok_or(PrivilegeSessionError::InspectionFailed)?;
-    fields
-        .split_whitespace()
-        .nth(1)
+    let mut fields = fields.split_whitespace();
+    let real_uid = fields
+        .next()
         .ok_or(PrivilegeSessionError::InspectionFailed)?
         .parse()
-        .map_err(|_| PrivilegeSessionError::InspectionFailed)
+        .map_err(|_| PrivilegeSessionError::InspectionFailed)?;
+    let effective_uid = fields
+        .next()
+        .ok_or(PrivilegeSessionError::InspectionFailed)?
+        .parse()
+        .map_err(|_| PrivilegeSessionError::InspectionFailed)?;
+    Ok((real_uid, effective_uid))
 }
 
 pub(crate) fn reject_existing_privileged_sessions_at(
@@ -51,8 +57,12 @@ pub(crate) fn reject_existing_privileged_sessions_at(
         let Some(status) = read_process_file(&process, "status")? else {
             continue;
         };
-        if effective_uid(&status)? != 0 {
+        let (real_uid, effective_uid) = real_and_effective_uid(&status)?;
+        if effective_uid != 0 {
             continue;
+        }
+        if real_uid == protected_uid {
+            return Err(PrivilegeSessionError::ExistingPrivilegedSession);
         }
 
         let Some(login_uid) = read_process_file(&process, "loginuid")? else {
