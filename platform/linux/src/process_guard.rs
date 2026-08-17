@@ -212,6 +212,45 @@ impl ProductionProcessGuard {
         self.enforced_uid
     }
 
+    fn execution_channel(
+        &self,
+        source: NixFanotifyPermissionSource,
+    ) -> FanotifyExecutionChannel<NixFanotifyPermissionSource, ProcfsExecutionFactSource> {
+        if let Some(enforced_uid) = self.enforced_uid {
+            FanotifyExecutionChannel::for_uid(
+                source,
+                ProcfsExecutionFactSource,
+                ExecutionContextClassifier::new(Vec::new()),
+                enforced_uid,
+            )
+        } else {
+            FanotifyExecutionChannel::new(
+                source,
+                ProcfsExecutionFactSource,
+                ExecutionContextClassifier::new(Vec::new()),
+            )
+        }
+    }
+
+    fn watchdog_control(
+        &self,
+    ) -> LinuxProcessControl<ProcfsExecutionFactSource, RustixPidfdOps> {
+        if let Some(enforced_uid) = self.enforced_uid {
+            LinuxProcessControl::for_uid(
+                ProcfsExecutionFactSource,
+                RustixPidfdOps,
+                ExecutionContextClassifier::new(Vec::new()),
+                enforced_uid,
+            )
+        } else {
+            LinuxProcessControl::new(
+                ProcfsExecutionFactSource,
+                RustixPidfdOps,
+                ExecutionContextClassifier::new(Vec::new()),
+            )
+        }
+    }
+
     fn stop_worker(&mut self) -> Result<(), ProcessGuardError> {
         let Some(worker) = self.worker.as_ref() else {
             return Ok(());
@@ -250,34 +289,8 @@ impl ProcessGuardControl for ProductionProcessGuard {
 
         let source = NixFanotifyPermissionSource::new_for_mounts(self.mounts.iter())
             .map_err(|_| ProcessGuardError::Unavailable)?;
-        let mut channel = if let Some(enforced_uid) = self.enforced_uid {
-            FanotifyExecutionChannel::for_uid(
-                source,
-                ProcfsExecutionFactSource,
-                ExecutionContextClassifier::new(Vec::new()),
-                enforced_uid,
-            )
-        } else {
-            FanotifyExecutionChannel::new(
-                source,
-                ProcfsExecutionFactSource,
-                ExecutionContextClassifier::new(Vec::new()),
-            )
-        };
-        let mut watchdog_control = if let Some(enforced_uid) = self.enforced_uid {
-            LinuxProcessControl::for_uid(
-                ProcfsExecutionFactSource,
-                RustixPidfdOps,
-                ExecutionContextClassifier::new(Vec::new()),
-                enforced_uid,
-            )
-        } else {
-            LinuxProcessControl::new(
-                ProcfsExecutionFactSource,
-                RustixPidfdOps,
-                ExecutionContextClassifier::new(Vec::new()),
-            )
-        };
+        let mut channel = self.execution_channel(source);
+        let mut watchdog_control = self.watchdog_control();
         let frozen_plan = plan.clone();
         let healthy = Arc::new(AtomicBool::new(true));
         let stop_requested = Arc::new(AtomicBool::new(false));
