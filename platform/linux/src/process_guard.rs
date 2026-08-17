@@ -31,12 +31,24 @@ pub enum ProcessGuardError {
 /// repeat the call after the platform effect completed but before protected daemon state advanced.
 pub trait ProcessGuardControl {
     /// Arms continuous execution prevention against the exact frozen process plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the guard cannot initialize or cannot replace an unhealthy worker.
     fn arm(&mut self, plan: &ProcessEnforcementPlan) -> Result<(), ProcessGuardError>;
 
     /// Verifies that the guard is healthy and enforcing the expected frozen policy digest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no healthy worker is enforcing the expected policy digest.
     fn verify(&mut self, expected_policy_digest: [u8; 32]) -> Result<(), ProcessGuardError>;
 
     /// Stops the continuous process guard. The operation must be idempotent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an active worker cannot be stopped cleanly.
     fn disarm(&mut self) -> Result<(), ProcessGuardError>;
 }
 
