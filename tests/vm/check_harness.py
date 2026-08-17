@@ -49,11 +49,15 @@ required_guest_markers = [
     "systemctl reboot",
     "systemctl suspend",
     "FOCUS_ALLOWED_UID=0",
+    "FOCUS_CLI_PATH=",
     "--test fanotify_live",
     "--ignored",
 ]
 for marker in required_guest_markers:
     if marker not in guest:
         raise SystemExit(f"guest VM runner is missing {marker}")
+
+if "FOCUS_CLI_EXECUTABLE" in guest:
+    raise SystemExit("guest VM runner uses obsolete focusd CLI path configuration")
 
 print("Disposable Linux VM harness contract satisfied.")
