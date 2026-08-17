@@ -482,6 +482,24 @@ mod tests {
     }
 
     #[test]
+    fn pam_rule_after_account_shortcut_is_rejected_before_deny_list_mutation() {
+        let fixture = Fixture::new();
+        fs::write(
+            &fixture.pam_config,
+            format!(
+                "#%PAM-1.0\naccount sufficient pam_permit.so\n{REQUIRED_PAM_ACCOUNT_RULE}\n"
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            arm_at_paths(fixture.paths(), fixture.owner_uid, "focus-user"),
+            Err(PrivilegeGuardError::MissingPamRule)
+        );
+        assert_eq!(fs::read_to_string(&fixture.deny_list).unwrap(), "");
+    }
+
+    #[test]
     fn writable_state_directory_is_rejected() {
         let fixture = Fixture::new();
         let state_dir = fixture.deny_list.parent().unwrap();
