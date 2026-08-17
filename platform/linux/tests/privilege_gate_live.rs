@@ -80,16 +80,26 @@ fn install_fixture_user() -> u32 {
         .unwrap()
 }
 
+fn pam_with_required_account_rule(original: &str) -> String {
+    if original.lines().any(|line| line.trim() == PAM_RULE) {
+        return original.to_owned();
+    }
+
+    if let Some(rest) = original.strip_prefix("#%PAM-1.0\n") {
+        return format!("#%PAM-1.0\n{PAM_RULE}\n{rest}");
+    }
+    if original == "#%PAM-1.0" {
+        return format!("#%PAM-1.0\n{PAM_RULE}\n");
+    }
+
+    format!("{PAM_RULE}\n{original}")
+}
+
 fn install_sudo_fixture() -> String {
     let original_pam = fs::read_to_string(PAM_PATH).unwrap();
-    let mut pam = original_pam.clone();
-    if !pam.lines().any(|line| line.trim() == PAM_RULE) {
-        if !pam.ends_with('\n') {
-            pam.push('\n');
-        }
-        pam.push_str(PAM_RULE);
-        pam.push('\n');
-        fs::write(PAM_PATH, pam).unwrap();
+    let configured_pam = pam_with_required_account_rule(&original_pam);
+    if configured_pam != original_pam {
+        fs::write(PAM_PATH, configured_pam).unwrap();
     }
 
     fs::write(
@@ -255,6 +265,15 @@ fn fixture_pam_rule_precedes_sufficient_account_modules() {
     let sufficient_rule = configured.find("account sufficient pam_permit.so").unwrap();
 
     assert!(focus_rule < sufficient_rule);
+}
+
+#[test]
+fn fixture_pam_rule_is_not_duplicated() {
+    let original = format!("#%PAM-1.0\n{PAM_RULE}\n@include common-auth\n");
+    let configured = pam_with_required_account_rule(&original);
+
+    assert_eq!(configured.matches(PAM_RULE).count(), 1);
+    assert_eq!(configured, original);
 }
 
 #[test]
