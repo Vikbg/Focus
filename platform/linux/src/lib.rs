@@ -9,6 +9,7 @@ mod fanotify_execution_channel;
 mod linux_process_control;
 mod nix_fanotify;
 mod preflight;
+mod privilege_guard;
 mod process_closer;
 mod process_guard;
 mod rustix_pidfd;
@@ -42,6 +43,7 @@ pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
 };
+pub use privilege_guard::ProductionPrivilegeGuard;
 pub use process_closer::{
     ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
     close_blocked_processes,
