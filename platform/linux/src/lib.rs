@@ -11,6 +11,7 @@ mod linux_process_control;
 mod nix_fanotify;
 mod preflight;
 mod privilege_guard;
+mod privilege_session;
 mod process_closer;
 mod process_guard;
 mod rustix_pidfd;
