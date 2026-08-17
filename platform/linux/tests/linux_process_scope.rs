@@ -37,7 +37,9 @@ impl LinuxExecutionFactSource for Source {
             .get(&pid)
             .copied()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "process disappeared"))?;
-        Ok(format!("Name:\ttest\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\nPPid:\t1\n"))
+        Ok(format!(
+            "Name:\ttest\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\nPPid:\t1\n"
+        ))
     }
 
     fn stat_text(&self, _pid: u32) -> io::Result<String> {
@@ -84,7 +86,10 @@ fn user_scoped_inventory_excludes_root_and_other_users() {
         1000,
     );
 
-    assert_eq!(ProcessControl::process_ids(&control).unwrap(), vec![100, 102]);
+    assert_eq!(
+        ProcessControl::process_ids(&control).unwrap(),
+        vec![100, 102]
+    );
 }
 
 #[test]
@@ -129,5 +134,8 @@ fn unreadable_uid_fails_closed_in_scoped_inventory() {
         1000,
     );
 
-    assert_eq!(control.process_ids(), Err(ProcessCloseError::InventoryFailed));
+    assert_eq!(
+        control.process_ids(),
+        Err(ProcessCloseError::InventoryFailed)
+    );
 }
