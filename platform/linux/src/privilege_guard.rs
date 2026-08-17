@@ -303,14 +303,14 @@ impl PrivilegeGuardControl for ProductionPrivilegeGuard {
 mod tests {
     use std::{
         fs,
-        os::unix::fs::{MetadataExt, PermissionsExt},
+        os::unix::fs::{MetadataExt, PermissionsExt, symlink},
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use super::{
-        PrivilegeGuardPaths, REQUIRED_PAM_ACCOUNT_RULE, arm_at_paths, disarm_at_paths,
-        verify_at_paths,
+        PrivilegeGuardError, PrivilegeGuardPaths, REQUIRED_PAM_ACCOUNT_RULE, arm_at_paths,
+        disarm_at_paths, verify_at_paths,
     };
 
     struct Fixture {
@@ -391,5 +391,79 @@ mod tests {
                 & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn pam_symlink_is_rejected_before_deny_list_mutation() {
+        let fixture = Fixture::new();
+        let target = fixture.root.join("sudo-target");
+        fs::rename(&fixture.pam_config, &target).unwrap();
+        symlink(&target, &fixture.pam_config).unwrap();
+
+        assert_eq!(
+            arm_at_paths(fixture.paths(), fixture.owner_uid, "focus-user"),
+            Err(PrivilegeGuardError::UnsafePamConfiguration)
+        );
+        assert_eq!(fs::read_to_string(&fixture.deny_list).unwrap(), "");
+    }
+
+    #[test]
+    fn missing_pam_rule_is_rejected_before_deny_list_mutation() {
+        let fixture = Fixture::new();
+        fs::write(&fixture.pam_config, "#%PAM-1.0\n@include common-auth\n").unwrap();
+
+        assert_eq!(
+            arm_at_paths(fixture.paths(), fixture.owner_uid, "focus-user"),
+            Err(PrivilegeGuardError::MissingPamRule)
+        );
+        assert_eq!(fs::read_to_string(&fixture.deny_list).unwrap(), "");
+    }
+
+    #[test]
+    fn writable_state_directory_is_rejected() {
+        let fixture = Fixture::new();
+        let state_dir = fixture.deny_list.parent().unwrap();
+        fs::set_permissions(state_dir, fs::Permissions::from_mode(0o777)).unwrap();
+
+        assert_eq!(
+            arm_at_paths(fixture.paths(), fixture.owner_uid, "focus-user"),
+            Err(PrivilegeGuardError::UnsafeStateDirectory)
+        );
+    }
+
+    #[test]
+    fn deny_list_symlink_is_rejected() {
+        let fixture = Fixture::new();
+        let target = fixture.root.join("deny-target");
+        fs::write(&target, "").unwrap();
+        fs::remove_file(&fixture.deny_list).unwrap();
+        symlink(&target, &fixture.deny_list).unwrap();
+
+        assert_eq!(
+            arm_at_paths(fixture.paths(), fixture.owner_uid, "focus-user"),
+            Err(PrivilegeGuardError::UnsafeDenyList)
+        );
+    }
+
+    #[test]
+    fn weak_deny_list_mode_is_rejected() {
+        let fixture = Fixture::new();
+        fs::set_permissions(&fixture.deny_list, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(
+            arm_at_paths(fixture.paths(), fixture.owner_uid, "focus-user"),
+            Err(PrivilegeGuardError::UnsafeDenyList)
+        );
+    }
+
+    #[test]
+    fn unsafe_username_is_rejected_before_privilege_files_are_touched() {
+        let fixture = Fixture::new();
+
+        assert_eq!(
+            arm_at_paths(fixture.paths(), fixture.owner_uid, "focus-user\nroot"),
+            Err(PrivilegeGuardError::InvalidUserIdentity)
+        );
+        assert_eq!(fs::read_to_string(&fixture.deny_list).unwrap(), "");
     }
 }
