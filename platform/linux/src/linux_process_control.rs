@@ -106,6 +106,12 @@ impl<S, O> LinuxProcessControl<S, O> {
     pub const fn handle_ops(&self) -> &O {
         &self.handle_ops
     }
+
+    /// Returns the protected effective UID when this control is user-scoped.
+    #[must_use]
+    pub const fn enforced_uid(&self) -> Option<u32> {
+        self.enforced_uid
+    }
 }
 
 impl<S, O> ProcessControl for LinuxProcessControl<S, O>
