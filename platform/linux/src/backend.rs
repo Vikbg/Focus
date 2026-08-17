@@ -1,7 +1,5 @@
 use focus_core::ProcessEnforcementPlan;
-use focus_platform::{
-    GuardKind, PlatformBackend, PlatformError, PlatformFuture, PrivilegedAction,
-};
+use focus_platform::{GuardKind, PlatformBackend, PlatformError, PlatformFuture, PrivilegedAction};
 
 use crate::{
     ExecutionContextClassifier, FailClosedPrivilegeBroker, FailClosedPrivilegeGuard,
@@ -111,13 +109,7 @@ impl<P>
 }
 
 impl<P, C>
-    LinuxBackend<
-        P,
-        C,
-        FailClosedProcessGuard,
-        FailClosedPrivilegeGuard,
-        FailClosedPrivilegeBroker,
-    >
+    LinuxBackend<P, C, FailClosedProcessGuard, FailClosedPrivilegeGuard, FailClosedPrivilegeBroker>
 {
     /// Creates a Linux backend with explicit read-only system and process-control dependencies.
     /// Process and privilege enforcement remain fail-closed.
@@ -133,9 +125,7 @@ impl<P, C>
     }
 }
 
-impl<P, C, G>
-    LinuxBackend<P, C, G, FailClosedPrivilegeGuard, FailClosedPrivilegeBroker>
-{
+impl<P, C, G> LinuxBackend<P, C, G, FailClosedPrivilegeGuard, FailClosedPrivilegeBroker> {
     /// Creates a Linux backend with explicit system, process-control, and process-guard
     /// dependencies. Privilege enforcement remains fail-closed.
     #[must_use]
