@@ -7,7 +7,7 @@ use std::{
 use focus_core::ProcessEnforcementPlan;
 use focus_linux::{
     LinuxBackend, LinuxError, ProcessCloseError, ProcessControl, ProcessGuardControl,
-    ProcessGuardError, ProcessLifetime, RunningProcess, SystemProbe,
+    ProcessGuardError, ProcessLifetime, ProductionProcessGuard, RunningProcess, SystemProbe,
 };
 use focus_platform::{GuardKind, PlatformBackend, PlatformError};
 
@@ -128,6 +128,12 @@ impl ProcessGuardControl for RecordingGuard {
 
 fn plan(digest: [u8; 32]) -> ProcessEnforcementPlan {
     ProcessEnforcementPlan::strict(digest, Vec::new(), vec!["/home/student/code".to_owned()])
+}
+
+#[test]
+fn default_backend_uses_production_process_guard() {
+    let backend = LinuxBackend::default();
+    let _: &ProductionProcessGuard = backend.process_guard();
 }
 
 #[test]
