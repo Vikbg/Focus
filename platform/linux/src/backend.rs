@@ -74,12 +74,7 @@ impl ProductionLinuxBackend {
 }
 
 impl<P>
-    LinuxBackend<
-        P,
-        ProductionProcessControl,
-        FailClosedProcessGuard,
-        FailClosedPrivilegeGuard,
-    >
+    LinuxBackend<P, ProductionProcessControl, FailClosedProcessGuard, FailClosedPrivilegeGuard>
 {
     /// Creates a Linux backend with an explicit read-only system probe and production process
     /// control. Process and privilege enforcement remain fail-closed until explicit controllers are
