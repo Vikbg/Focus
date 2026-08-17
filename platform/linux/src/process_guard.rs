@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 use focus_core::ProcessEnforcementPlan;
@@ -17,20 +18,28 @@ use nix::{
 };
 
 use crate::{
-    ExecutionContextClassifier, FanotifyExecutionChannel, NixFanotifyPermissionSource,
-    ProcfsExecutionFactSource, process_next_execution_permission,
+    ExecutionContextClassifier, FanotifyExecutionChannel, LinuxProcessControl,
+    NixFanotifyPermissionSource, ProcfsExecutionFactSource, RustixPidfdOps,
+    close_blocked_processes, process_next_execution_permission,
 };
+
+const WATCHDOG_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProcessGuardWake {
     Permission,
     Stop,
+    Watchdog,
 }
 
 fn wait_for_process_guard_wake(
     permission_fd: BorrowedFd<'_>,
     stop_fd: BorrowedFd<'_>,
+    watchdog_interval: Duration,
 ) -> io::Result<ProcessGuardWake> {
+    let deadline = Instant::now()
+        .checked_add(watchdog_interval)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "watchdog deadline overflow"))?;
     let mut fds = [
         PollFd::new(permission_fd, PollFlags::POLLIN),
         PollFd::new(stop_fd, PollFlags::POLLIN),
@@ -38,7 +47,16 @@ fn wait_for_process_guard_wake(
     let fatal = PollFlags::POLLERR | PollFlags::POLLHUP | PollFlags::POLLNVAL;
 
     loop {
-        match poll(&mut fds, PollTimeout::NONE) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(ProcessGuardWake::Watchdog);
+        }
+        let timeout = PollTimeout::try_from(remaining).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "watchdog interval is too large")
+        })?;
+
+        match poll(&mut fds, timeout) {
+            Ok(0) => return Ok(ProcessGuardWake::Watchdog),
             Ok(_) => {
                 let permission_events = fds[0].revents().unwrap_or_else(PollFlags::empty);
                 let stop_events = fds[1].revents().unwrap_or_else(PollFlags::empty);
@@ -136,8 +154,9 @@ impl ProcessGuardWorker {
 ///
 /// The guard creates the privileged fanotify permission source only when a protected session is
 /// armed. Permission events are evaluated against the immutable process plan on a dedicated worker
-/// thread. Any transport or classification failure makes the worker unhealthy so verification can
-/// never report a false success.
+/// thread. A periodic procfs and pidfd watchdog closes explicitly blocked processes as a second
+/// layer. Any transport, classification, inventory, or termination failure makes the worker
+/// unhealthy so verification can never report a false success.
 #[derive(Debug)]
 pub struct ProductionProcessGuard {
     mounts: Vec<PathBuf>,
@@ -157,8 +176,8 @@ impl ProductionProcessGuard {
     /// Creates a production guard over an explicit set of mounted filesystem roots.
     ///
     /// This constructor is primarily useful for privileged VM fixtures. Production defaults to the
-    /// root mount and later watchdog coverage remains responsible for execution paths that appear on
-    /// mounts created after arming.
+    /// root mount and the runtime watchdog remains responsible for blocked processes that appear on
+    /// execution paths outside the marked mount.
     #[must_use]
     pub fn for_mounts<I, P>(mounts: I) -> Self
     where
@@ -214,6 +233,11 @@ impl ProcessGuardControl for ProductionProcessGuard {
             ProcfsExecutionFactSource,
             ExecutionContextClassifier::new(Vec::new()),
         );
+        let mut watchdog_control = LinuxProcessControl::new(
+            ProcfsExecutionFactSource,
+            RustixPidfdOps,
+            ExecutionContextClassifier::new(Vec::new()),
+        );
         let frozen_plan = plan.clone();
         let healthy = Arc::new(AtomicBool::new(true));
         let stop_requested = Arc::new(AtomicBool::new(false));
@@ -228,28 +252,47 @@ impl ProcessGuardControl for ProductionProcessGuard {
         let handle = thread::Builder::new()
             .name("focus-process-guard".to_owned())
             .spawn(move || {
+                let mut next_watchdog = Instant::now() + WATCHDOG_INTERVAL;
+
                 while !worker_stop_requested.load(Ordering::Acquire) {
-                    match process_next_execution_permission(&mut channel, &frozen_plan) {
-                        Ok(crate::ExecutionPermissionStep::Idle) => {
-                            match wait_for_process_guard_wake(
-                                channel.source_fd(),
-                                worker_stop_event.as_fd(),
-                            ) {
-                                Ok(ProcessGuardWake::Permission) => {}
-                                Ok(ProcessGuardWake::Stop) => break,
-                                Err(_) => {
-                                    worker_healthy.store(false, Ordering::Release);
-                                    break;
-                                }
-                            }
-                        }
-                        Ok(
-                            crate::ExecutionPermissionStep::Allowed
-                            | crate::ExecutionPermissionStep::Denied,
-                        ) => {}
+                    let step = match process_next_execution_permission(&mut channel, &frozen_plan) {
+                        Ok(step) => step,
                         Err(_) => {
                             worker_healthy.store(false, Ordering::Release);
                             break;
+                        }
+                    };
+
+                    if Instant::now() >= next_watchdog {
+                        if close_blocked_processes(&mut watchdog_control, &frozen_plan).is_err() {
+                            worker_healthy.store(false, Ordering::Release);
+                            break;
+                        }
+                        next_watchdog = Instant::now() + WATCHDOG_INTERVAL;
+                    }
+
+                    if step == crate::ExecutionPermissionStep::Idle {
+                        let remaining = next_watchdog.saturating_duration_since(Instant::now());
+                        match wait_for_process_guard_wake(
+                            channel.source_fd(),
+                            worker_stop_event.as_fd(),
+                            remaining,
+                        ) {
+                            Ok(ProcessGuardWake::Permission) => {}
+                            Ok(ProcessGuardWake::Stop) => break,
+                            Ok(ProcessGuardWake::Watchdog) => {
+                                if close_blocked_processes(&mut watchdog_control, &frozen_plan)
+                                    .is_err()
+                                {
+                                    worker_healthy.store(false, Ordering::Release);
+                                    break;
+                                }
+                                next_watchdog = Instant::now() + WATCHDOG_INTERVAL;
+                            }
+                            Err(_) => {
+                                worker_healthy.store(false, Ordering::Release);
+                                break;
+                            }
                         }
                     }
                 }
