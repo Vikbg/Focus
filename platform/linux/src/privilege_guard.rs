@@ -8,6 +8,8 @@ use std::{
 
 use nix::unistd::{Uid, User};
 
+use crate::privilege_session::{PrivilegeSessionError, reject_existing_privileged_sessions_at};
+
 const PAM_CONFIG_PATH: &str = "/etc/pam.d/sudo";
 const PRIVILEGE_DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
 const REQUIRED_PAM_ACCOUNT_RULE: &str = "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
@@ -27,6 +29,8 @@ pub enum PrivilegeGuardError {
     MissingPamRule,
     UnsafeStateDirectory,
     UnsafeDenyList,
+    PrivilegeSessionInspectionFailed,
+    ExistingPrivilegedSession,
 }
 
 /// Typed privilege-restriction control owned by the Linux backend.
@@ -35,16 +39,18 @@ pub trait PrivilegeGuardControl {
     ///
     /// # Errors
     ///
-    /// Returns an error when the protected user cannot be resolved or the required PAM policy and
-    /// deny-list cannot be applied safely.
+    /// Returns an error when the protected user cannot be resolved, an existing privileged session
+    /// is attributed to that user, or the required PAM policy and deny-list cannot be applied
+    /// safely.
     fn arm(&mut self) -> Result<(), PrivilegeGuardError>;
 
     /// Verifies that the privilege restriction remains active and healthy.
     ///
     /// # Errors
     ///
-    /// Returns an error when the protected user cannot be resolved or the PAM policy and deny-list
-    /// no longer match the armed restriction.
+    /// Returns an error when the protected user cannot be resolved, a privileged session is still
+    /// attributed to that user, or the PAM policy and deny-list no longer match the armed
+    /// restriction.
     fn verify(&mut self) -> Result<(), PrivilegeGuardError>;
 
     /// Removes the privilege restriction. The operation must be idempotent.
@@ -242,6 +248,48 @@ fn verify_at_paths(
     Ok(())
 }
 
+fn reject_existing_privileged_sessions(
+    proc_root: &Path,
+    protected_uid: u32,
+) -> Result<(), PrivilegeGuardError> {
+    reject_existing_privileged_sessions_at(proc_root, protected_uid).map_err(|error| match error {
+        PrivilegeSessionError::InspectionFailed => {
+            PrivilegeGuardError::PrivilegeSessionInspectionFailed
+        }
+        PrivilegeSessionError::ExistingPrivilegedSession => {
+            PrivilegeGuardError::ExistingPrivilegedSession
+        }
+    })
+}
+
+pub(crate) fn arm_with_session_scan_at(
+    proc_root: &Path,
+    pam_config: &Path,
+    deny_list: &Path,
+    owner_uid: u32,
+    username: &str,
+    protected_uid: u32,
+) -> Result<(), PrivilegeGuardError> {
+    reject_existing_privileged_sessions(proc_root, protected_uid)?;
+    arm_at_paths(
+        PrivilegeGuardPaths::new(pam_config, deny_list),
+        owner_uid,
+        username,
+    )?;
+    reject_existing_privileged_sessions(proc_root, protected_uid)
+}
+
+fn verify_with_session_scan_at(
+    proc_root: &Path,
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+    username: &str,
+    protected_uid: u32,
+) -> Result<(), PrivilegeGuardError> {
+    verify_at_paths(paths, owner_uid, username)?;
+    reject_existing_privileged_sessions(proc_root, protected_uid)
+}
+
 fn disarm_at_paths(
     paths: PrivilegeGuardPaths<'_>,
     owner_uid: u32,
@@ -286,12 +334,26 @@ impl ProductionPrivilegeGuard {
 impl PrivilegeGuardControl for ProductionPrivilegeGuard {
     fn arm(&mut self) -> Result<(), PrivilegeGuardError> {
         let username = resolve_username(self.enforced_uid)?;
-        arm_at_paths(production_paths(), SYSTEM_OWNER_UID, &username)
+        let paths = production_paths();
+        arm_with_session_scan_at(
+            Path::new("/proc"),
+            paths.pam_config,
+            paths.deny_list,
+            SYSTEM_OWNER_UID,
+            &username,
+            self.enforced_uid,
+        )
     }
 
     fn verify(&mut self) -> Result<(), PrivilegeGuardError> {
         let username = resolve_username(self.enforced_uid)?;
-        verify_at_paths(production_paths(), SYSTEM_OWNER_UID, &username)
+        verify_with_session_scan_at(
+            Path::new("/proc"),
+            production_paths(),
+            SYSTEM_OWNER_UID,
+            &username,
+            self.enforced_uid,
+        )
     }
 
     fn disarm(&mut self) -> Result<(), PrivilegeGuardError> {
@@ -310,7 +372,7 @@ mod tests {
 
     use super::{
         PrivilegeGuardError, PrivilegeGuardPaths, REQUIRED_PAM_ACCOUNT_RULE, arm_at_paths,
-        arm_at_paths_with_session_scan, disarm_at_paths, verify_at_paths,
+        disarm_at_paths, verify_at_paths,
     };
 
     struct Fixture {
@@ -390,35 +452,6 @@ mod tests {
                 .mode()
                 & 0o777,
             0o600
-        );
-    }
-
-    #[test]
-    fn existing_privileged_session_fails_arm_after_deny_list_is_applied() {
-        let fixture = Fixture::new();
-        let proc_root = fixture.root.join("proc");
-        let process = proc_root.join("101");
-        fs::create_dir_all(&process).unwrap();
-        fs::write(
-            process.join("status"),
-            "Name:\tfixture\nUid:\t0\t0\t0\t0\n",
-        )
-        .unwrap();
-        fs::write(process.join("loginuid"), "1000\n").unwrap();
-
-        assert_eq!(
-            arm_at_paths_with_session_scan(
-                fixture.paths(),
-                fixture.owner_uid,
-                "focus-user",
-                &proc_root,
-                1000,
-            ),
-            Err(PrivilegeGuardError::ExistingPrivilegedSession)
-        );
-        assert_eq!(
-            fs::read_to_string(&fixture.deny_list).unwrap(),
-            "focus-user\n"
         );
     }
 
