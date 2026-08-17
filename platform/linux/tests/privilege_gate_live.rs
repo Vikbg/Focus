@@ -1,19 +1,34 @@
 use std::{
     fs,
+    future::Future,
     os::unix::fs::PermissionsExt,
     path::Path,
+    pin::pin,
     process::{Command, Output},
+    task::{Context, Poll, Waker},
 };
 
-use focus_linux::{PrivilegeGuardControl, ProductionPrivilegeGuard};
+use focus_linux::{PrivilegeGuardControl, ProductionLinuxBackend, ProductionPrivilegeGuard};
+use focus_platform::{PlatformBackend, PrivilegedAction};
 
 const FIXTURE_USER: &str = "focuspriv";
 const SUDOERS_PATH: &str = "/etc/sudoers.d/focus-task21";
 const PAM_PATH: &str = "/etc/pam.d/sudo";
 const DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
 const SERVICE_PATH: &str = "/etc/systemd/system/focusd.service";
+const DOCKER_SERVICE_PATH: &str = "/etc/systemd/system/docker.service";
 const PAM_RULE: &str = "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
 const NFT_TABLE: &str = "focus_task21_fixture";
+
+fn block_on_ready<F: Future>(future: F) -> F::Output {
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
+    let mut future = pin!(future);
+    match future.as_mut().poll(&mut context) {
+        Poll::Ready(output) => output,
+        Poll::Pending => panic!("Linux privilege fixture futures must resolve immediately"),
+    }
+}
 
 fn command_status(program: &str, arguments: &[&str]) -> bool {
     Command::new(program)
@@ -94,18 +109,32 @@ fn install_sudo_fixture() -> String {
 fn install_service_fixture() {
     assert!(
         !Path::new(SERVICE_PATH).exists(),
-        "disposable Task 21 VM must not contain a preinstalled focusd.service"
+        "disposable Task 21 VM must not contain a preinstalled focusd.service override"
+    );
+    assert!(
+        !Path::new(DOCKER_SERVICE_PATH).exists(),
+        "disposable Task 21 VM must not contain a preinstalled docker.service override"
     );
     fs::write(
         SERVICE_PATH,
         "[Unit]\nDescription=Focus Task 21 privilege fixture\n[Service]\nType=simple\nExecStart=/bin/sleep infinity\n",
     )
     .unwrap();
+    fs::write(
+        DOCKER_SERVICE_PATH,
+        "[Unit]\nDescription=Focus Task 21 typed broker fixture\n[Service]\nType=simple\nExecStart=/bin/sleep infinity\n",
+    )
+    .unwrap();
     assert!(command_status("systemctl", &["daemon-reload"]));
     assert!(command_status("systemctl", &["start", "focusd"]));
+    assert!(command_status("systemctl", &["stop", "docker.service"]));
     assert!(command_status(
         "systemctl",
         &["is-active", "--quiet", "focusd"]
+    ));
+    assert!(!command_status(
+        "systemctl",
+        &["is-active", "--quiet", "docker.service"]
     ));
 }
 
@@ -157,7 +186,11 @@ impl Drop for VmFixture {
         let _ = Command::new("nft")
             .args(["delete", "table", "inet", NFT_TABLE])
             .status();
+        let _ = Command::new("systemctl")
+            .args(["stop", "docker.service"])
+            .status();
         let _ = Command::new("systemctl").args(["stop", "focusd"]).status();
+        let _ = fs::remove_file(DOCKER_SERVICE_PATH);
         let _ = fs::remove_file(SERVICE_PATH);
         let _ = Command::new("systemctl").arg("daemon-reload").status();
         let _ = Command::new("userdel").args(["-r", FIXTURE_USER]).status();
@@ -202,6 +235,18 @@ fn assert_required_bypasses_are_blocked() {
     assert!(command_status("nft", &["list", "table", "inet", NFT_TABLE]));
 }
 
+fn assert_typed_broker_still_succeeds(protected_uid: u32) {
+    let mut backend = ProductionLinuxBackend::for_uid(protected_uid);
+    assert_eq!(
+        block_on_ready(backend.execute_privileged_action(PrivilegedAction::DockerStart)),
+        Ok(())
+    );
+    assert!(command_status(
+        "systemctl",
+        &["is-active", "--quiet", "docker.service"]
+    ));
+}
+
 #[test]
 #[ignore = "requires disposable root VM with sudo and PAM"]
 fn privilege_gate_blocks_unrestricted_sudo_paths() {
@@ -223,6 +268,7 @@ fn privilege_gate_blocks_unrestricted_sudo_paths() {
     guard.arm().unwrap();
     guard.verify().unwrap();
     assert_required_bypasses_are_blocked();
+    assert_typed_broker_still_succeeds(fixture.protected_uid);
     guard.verify().unwrap();
 
     guard.disarm().unwrap();
