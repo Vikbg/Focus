@@ -24,12 +24,19 @@ impl GuardKind {
     }
 }
 
+/// Closed set of privileged operations that may be brokered by the daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivilegedAction {
+    DockerStart,
+}
+
 /// Error returned by an operating-system enforcement backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformError {
     PreflightFailed,
     GuardFailed(GuardKind),
     CloseBlockedAppsFailed,
+    PrivilegedActionFailed(PrivilegedAction),
 }
 
 /// Result returned by platform enforcement operations.
@@ -97,6 +104,17 @@ pub trait PlatformBackend {
     fn disarm_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
+
+    /// Executes one explicitly approved privileged action.
+    ///
+    /// The default is fail-closed. The typed action contains no arbitrary command, argument vector,
+    /// or filesystem-write payload.
+    fn execute_privileged_action(
+        &mut self,
+        action: PrivilegedAction,
+    ) -> PlatformFuture<'_, ()> {
+        Box::pin(async move { Err(PlatformError::PrivilegedActionFailed(action)) })
+    }
 }
 
 /// Production-safe placeholder used until a real operating-system backend is available.
@@ -123,6 +141,7 @@ pub struct FakeBackend {
     armed: Vec<GuardKind>,
     disarmed: Vec<GuardKind>,
     process_policy_digest: Option<[u8; 32]>,
+    privileged_actions: Vec<PrivilegedAction>,
 }
 
 impl FakeBackend {
@@ -177,6 +196,12 @@ impl FakeBackend {
     #[must_use]
     pub const fn process_policy_digest(&self) -> Option<[u8; 32]> {
         self.process_policy_digest
+    }
+
+    /// Returns privileged actions executed through the typed fake broker.
+    #[must_use]
+    pub fn privileged_actions(&self) -> &[PrivilegedAction] {
+        &self.privileged_actions
     }
 
     const fn should_fail(mask: u8, guard: GuardKind) -> bool {
@@ -284,5 +309,13 @@ impl PlatformBackend for FakeBackend {
                 Ok(())
             }
         })
+    }
+
+    fn execute_privileged_action(
+        &mut self,
+        action: PrivilegedAction,
+    ) -> PlatformFuture<'_, ()> {
+        self.privileged_actions.push(action);
+        Box::pin(async { Ok(()) })
     }
 }
