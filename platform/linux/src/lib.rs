@@ -5,6 +5,7 @@ mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
 mod execution_permission;
+mod fail_closed_privilege_guard;
 mod fanotify_execution_channel;
 mod linux_process_control;
 mod nix_fanotify;
@@ -31,6 +32,7 @@ pub use execution_permission::{
     ExecutionAttempt, ExecutionPermission, ExecutionPermissionChannel, ExecutionPermissionStep,
     decide_execution_permission, process_next_execution_permission,
 };
+pub use fail_closed_privilege_guard::FailClosedPrivilegeGuard;
 pub use fanotify_execution_channel::{
     FanotifyChannelHealth, FanotifyExecutionChannel, FanotifyExecutionEvent,
     FanotifyPermissionSource,
