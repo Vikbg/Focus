@@ -1,5 +1,16 @@
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
 const PRIVILEGE_DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
 const REQUIRED_PAM_ACCOUNT_RULE: &str = "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
+const SAFE_FILE_WRITE_MODE: u32 = 0o600;
+const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
+static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Error returned by the Linux privilege-restriction guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7,6 +18,11 @@ pub enum PrivilegeGuardError {
     Unavailable,
     Unhealthy,
     DisarmFailed,
+    InvalidUserIdentity,
+    UnsafePamConfiguration,
+    MissingPamRule,
+    UnsafeStateDirectory,
+    UnsafeDenyList,
 }
 
 /// Typed privilege-restriction control owned by the Linux backend.
@@ -31,6 +47,178 @@ pub trait PrivilegeGuardControl {
     ///
     /// Returns an error when an active restriction cannot be removed safely.
     fn disarm(&mut self) -> Result<(), PrivilegeGuardError>;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PrivilegeGuardPaths<'a> {
+    pam_config: &'a Path,
+    deny_list: &'a Path,
+}
+
+impl<'a> PrivilegeGuardPaths<'a> {
+    const fn new(pam_config: &'a Path, deny_list: &'a Path) -> Self {
+        Self {
+            pam_config,
+            deny_list,
+        }
+    }
+}
+
+fn safe_identity(identity: &str) -> bool {
+    !identity.is_empty()
+        && !identity
+            .chars()
+            .any(|character| matches!(character, '\n' | '\r' | '\0'))
+}
+
+fn safe_owned_regular_file(path: &Path, owner_uid: u32, exact_mode: Option<u32>) -> io::Result<bool> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.uid() != owner_uid {
+        return Ok(false);
+    }
+    let mode = metadata.permissions().mode() & 0o777;
+    Ok(exact_mode.map_or(mode & WRITEABLE_BY_NON_OWNER == 0, |expected| {
+        mode == expected
+    }))
+}
+
+fn safe_owned_directory(path: &Path, owner_uid: u32) -> io::Result<bool> {
+    let metadata = fs::symlink_metadata(path)?;
+    Ok(!metadata.file_type().is_symlink()
+        && metadata.is_dir()
+        && metadata.uid() == owner_uid
+        && metadata.permissions().mode() & WRITEABLE_BY_NON_OWNER == 0)
+}
+
+fn pam_rule_present(content: &str) -> bool {
+    content.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.starts_with('#')
+            && trimmed.split_whitespace().collect::<Vec<_>>().join(" ")
+                == REQUIRED_PAM_ACCOUNT_RULE
+    })
+}
+
+fn validate_pam_configuration(
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+) -> Result<(), PrivilegeGuardError> {
+    match safe_owned_regular_file(paths.pam_config, owner_uid, None) {
+        Ok(true) => {}
+        Ok(false) | Err(_) => return Err(PrivilegeGuardError::UnsafePamConfiguration),
+    }
+    let content =
+        fs::read_to_string(paths.pam_config).map_err(|_| PrivilegeGuardError::Unavailable)?;
+    if !pam_rule_present(&content) {
+        return Err(PrivilegeGuardError::MissingPamRule);
+    }
+    Ok(())
+}
+
+fn validate_state_directory(
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+) -> Result<&Path, PrivilegeGuardError> {
+    let parent = paths
+        .deny_list
+        .parent()
+        .ok_or(PrivilegeGuardError::UnsafeStateDirectory)?;
+    match safe_owned_directory(parent, owner_uid) {
+        Ok(true) => Ok(parent),
+        Ok(false) | Err(_) => Err(PrivilegeGuardError::UnsafeStateDirectory),
+    }
+}
+
+fn validate_deny_list(
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+) -> Result<(), PrivilegeGuardError> {
+    match safe_owned_regular_file(paths.deny_list, owner_uid, Some(SAFE_FILE_WRITE_MODE)) {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(_) => Err(PrivilegeGuardError::UnsafeDenyList),
+    }
+}
+
+fn atomic_write_deny_list(
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+    content: &str,
+) -> Result<(), PrivilegeGuardError> {
+    let parent = validate_state_directory(paths, owner_uid)?;
+    match fs::symlink_metadata(paths.deny_list) {
+        Ok(_) => validate_deny_list(paths, owner_uid)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => return Err(PrivilegeGuardError::UnsafeDenyList),
+    }
+
+    let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temp = parent.join(format!(
+        ".privilege-deny-users.tmp.{}.{}",
+        std::process::id(),
+        sequence
+    ));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(SAFE_FILE_WRITE_MODE)
+            .open(&temp)
+            .map_err(|_| PrivilegeGuardError::Unavailable)?;
+        file.write_all(content.as_bytes())
+            .map_err(|_| PrivilegeGuardError::Unavailable)?;
+        file.sync_all()
+            .map_err(|_| PrivilegeGuardError::Unavailable)?;
+        if !safe_owned_regular_file(&temp, owner_uid, Some(SAFE_FILE_WRITE_MODE)).unwrap_or(false) {
+            return Err(PrivilegeGuardError::UnsafeDenyList);
+        }
+        fs::rename(&temp, paths.deny_list).map_err(|_| PrivilegeGuardError::Unavailable)?;
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| PrivilegeGuardError::Unavailable)?;
+        validate_deny_list(paths, owner_uid)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+fn arm_at_paths(
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+    username: &str,
+) -> Result<(), PrivilegeGuardError> {
+    if !safe_identity(username) {
+        return Err(PrivilegeGuardError::InvalidUserIdentity);
+    }
+    validate_pam_configuration(paths, owner_uid)?;
+    atomic_write_deny_list(paths, owner_uid, &format!("{username}\n"))?;
+    verify_at_paths(paths, owner_uid, username)
+}
+
+fn verify_at_paths(
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+    username: &str,
+) -> Result<(), PrivilegeGuardError> {
+    if !safe_identity(username) {
+        return Err(PrivilegeGuardError::InvalidUserIdentity);
+    }
+    validate_pam_configuration(paths, owner_uid)?;
+    validate_deny_list(paths, owner_uid)?;
+    let content =
+        fs::read_to_string(paths.deny_list).map_err(|_| PrivilegeGuardError::Unhealthy)?;
+    if content != format!("{username}\n") {
+        return Err(PrivilegeGuardError::Unhealthy);
+    }
+    Ok(())
+}
+
+fn disarm_at_paths(
+    paths: PrivilegeGuardPaths<'_>,
+    owner_uid: u32,
+) -> Result<(), PrivilegeGuardError> {
+    atomic_write_deny_list(paths, owner_uid, "").map_err(|_| PrivilegeGuardError::DisarmFailed)
 }
 
 /// Production privilege-restriction guard scoped to one protected effective UID.
