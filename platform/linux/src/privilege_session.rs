@@ -74,11 +74,15 @@ pub(crate) fn reject_existing_privileged_sessions_at(
 mod tests {
     use std::{
         fs,
+        os::unix::fs::{MetadataExt, PermissionsExt},
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use super::reject_existing_privileged_sessions_at;
+    use crate::privilege_guard::arm_with_session_scan_at;
+
+    const PAM_RULE: &str = "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
 
     struct ProcFixture {
         root: PathBuf,
@@ -145,5 +149,39 @@ mod tests {
             reject_existing_privileged_sessions_at(&fixture.root, 1000),
             Ok(())
         );
+    }
+
+    #[test]
+    fn privilege_arm_rejects_existing_root_session_before_deny_list_mutation() {
+        let proc_fixture = ProcFixture::new();
+        proc_fixture.add_process(105, 0, 0, 1000);
+
+        let guard_root = proc_fixture.root.join("guard");
+        let state_dir = guard_root.join("state");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::set_permissions(&guard_root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&state_dir, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let pam_config = guard_root.join("sudo");
+        fs::write(&pam_config, format!("#%PAM-1.0\n{PAM_RULE}\n")).unwrap();
+        fs::set_permissions(&pam_config, fs::Permissions::from_mode(0o644)).unwrap();
+
+        let deny_list = state_dir.join("privilege-deny-users");
+        fs::write(&deny_list, "").unwrap();
+        fs::set_permissions(&deny_list, fs::Permissions::from_mode(0o600)).unwrap();
+        let owner_uid = fs::metadata(&guard_root).unwrap().uid();
+
+        assert!(
+            arm_with_session_scan_at(
+                &proc_fixture.root,
+                &pam_config,
+                &deny_list,
+                owner_uid,
+                "focus-user",
+                1000,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_to_string(deny_list).unwrap(), "");
     }
 }
