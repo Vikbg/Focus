@@ -1,4 +1,8 @@
-use std::{fs::File, io, os::fd::AsFd};
+use std::{
+    fs::File,
+    io,
+    os::fd::{AsFd, BorrowedFd},
+};
 
 use focus_core::ExecutionOrigin;
 
@@ -83,6 +87,15 @@ impl<S, F> FanotifyExecutionChannel<S, F> {
     fn fail<T>(&mut self, error: io::Error) -> io::Result<T> {
         self.health = FanotifyChannelHealth::Failed;
         Err(error)
+    }
+}
+
+impl<S, F> FanotifyExecutionChannel<S, F>
+where
+    S: AsFd,
+{
+    pub(crate) fn source_fd(&self) -> BorrowedFd<'_> {
+        self.source.as_fd()
     }
 }
 

@@ -1,21 +1,65 @@
 use std::{
+    io,
+    os::fd::{AsFd, BorrowedFd},
     path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
 };
 
 use focus_core::ProcessEnforcementPlan;
+use nix::{
+    errno::Errno,
+    poll::{PollFd, PollFlags, PollTimeout, poll},
+    sys::eventfd::{EfdFlags, EventFd},
+};
 
 use crate::{
     ExecutionContextClassifier, FanotifyExecutionChannel, NixFanotifyPermissionSource,
     ProcfsExecutionFactSource, process_next_execution_permission,
 };
 
-const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(2);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessGuardWake {
+    Permission,
+    Stop,
+}
+
+fn wait_for_process_guard_wake(
+    permission_fd: BorrowedFd<'_>,
+    stop_fd: BorrowedFd<'_>,
+) -> io::Result<ProcessGuardWake> {
+    let mut fds = [
+        PollFd::new(permission_fd, PollFlags::POLLIN),
+        PollFd::new(stop_fd, PollFlags::POLLIN),
+    ];
+    let fatal = PollFlags::POLLERR | PollFlags::POLLHUP | PollFlags::POLLNVAL;
+
+    loop {
+        match poll(&mut fds, PollTimeout::NONE) {
+            Ok(_) => {
+                let permission_events = fds[0].revents().unwrap_or_else(PollFlags::empty);
+                let stop_events = fds[1].revents().unwrap_or_else(PollFlags::empty);
+
+                if permission_events.intersects(fatal) || stop_events.intersects(fatal) {
+                    return Err(io::Error::other(
+                        "process guard readiness descriptor became unhealthy",
+                    ));
+                }
+                if stop_events.contains(PollFlags::POLLIN) {
+                    return Ok(ProcessGuardWake::Stop);
+                }
+                if permission_events.contains(PollFlags::POLLIN) {
+                    return Ok(ProcessGuardWake::Permission);
+                }
+            }
+            Err(Errno::EINTR) => {}
+            Err(error) => return Err(io::Error::from_raw_os_error(error as i32)),
+        }
+    }
+}
 
 /// Error returned by the continuous Linux process-execution guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +121,8 @@ impl ProcessGuardControl for FailClosedProcessGuard {
 struct ProcessGuardWorker {
     policy_digest: [u8; 32],
     healthy: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
+    stop_requested: Arc<AtomicBool>,
+    stop_event: Arc<EventFd>,
     handle: JoinHandle<()>,
 }
 
@@ -127,12 +172,21 @@ impl ProductionProcessGuard {
     }
 
     fn stop_worker(&mut self) -> Result<(), ProcessGuardError> {
-        let Some(worker) = self.worker.take() else {
+        let Some(worker) = self.worker.as_ref() else {
             return Ok(());
         };
 
-        worker.stop.store(true, Ordering::Release);
-        worker
+        worker.stop_requested.store(true, Ordering::Release);
+        if !worker.handle.is_finished() {
+            worker
+                .stop_event
+                .write(1)
+                .map_err(|_| ProcessGuardError::DisarmFailed)?;
+        }
+
+        self.worker
+            .take()
+            .expect("process guard worker exists after immutable borrow")
             .handle
             .join()
             .map_err(|_| ProcessGuardError::DisarmFailed)
@@ -162,17 +216,32 @@ impl ProcessGuardControl for ProductionProcessGuard {
         );
         let frozen_plan = plan.clone();
         let healthy = Arc::new(AtomicBool::new(true));
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let stop_event = Arc::new(
+            EventFd::from_flags(EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
+                .map_err(|_| ProcessGuardError::Unavailable)?,
+        );
         let worker_healthy = Arc::clone(&healthy);
-        let worker_stop = Arc::clone(&stop);
+        let worker_stop_requested = Arc::clone(&stop_requested);
+        let worker_stop_event = Arc::clone(&stop_event);
 
         let handle = thread::Builder::new()
             .name("focus-process-guard".to_owned())
             .spawn(move || {
-                while !worker_stop.load(Ordering::Acquire) {
+                while !worker_stop_requested.load(Ordering::Acquire) {
                     match process_next_execution_permission(&mut channel, &frozen_plan) {
                         Ok(crate::ExecutionPermissionStep::Idle) => {
-                            thread::sleep(IDLE_POLL_INTERVAL);
+                            match wait_for_process_guard_wake(
+                                channel.source_fd(),
+                                worker_stop_event.as_fd(),
+                            ) {
+                                Ok(ProcessGuardWake::Permission) => {}
+                                Ok(ProcessGuardWake::Stop) => break,
+                                Err(_) => {
+                                    worker_healthy.store(false, Ordering::Release);
+                                    break;
+                                }
+                            }
                         }
                         Ok(
                             crate::ExecutionPermissionStep::Allowed
@@ -190,7 +259,8 @@ impl ProcessGuardControl for ProductionProcessGuard {
         self.worker = Some(ProcessGuardWorker {
             policy_digest,
             healthy,
-            stop,
+            stop_requested,
+            stop_event,
             handle,
         });
         Ok(())

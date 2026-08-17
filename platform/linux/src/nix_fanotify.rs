@@ -1,4 +1,10 @@
-use std::{collections::VecDeque, fs::File, io, path::Path};
+use std::{
+    collections::VecDeque,
+    fs::File,
+    io,
+    os::fd::{AsFd, BorrowedFd},
+    path::Path,
+};
 
 use nix::{
     errno::Errno,
@@ -92,6 +98,12 @@ impl NixFanotifyPermissionSource {
             Err(Errno::EAGAIN) => Ok(()),
             Err(error) => Err(errno_to_io(error)),
         }
+    }
+}
+
+impl AsFd for NixFanotifyPermissionSource {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.fanotify.as_fd()
     }
 }
 
