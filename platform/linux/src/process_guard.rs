@@ -216,3 +216,34 @@ impl Drop for ProductionProcessGuard {
         let _ = self.disarm();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{io::Write, os::fd::AsFd, os::unix::net::UnixStream};
+
+    use super::{ProcessGuardWake, wait_for_process_guard_wake};
+
+    #[test]
+    fn event_wait_wakes_when_permission_fd_becomes_readable() {
+        let (mut permission_writer, permission_reader) = UnixStream::pair().unwrap();
+        let (_stop_writer, stop_reader) = UnixStream::pair().unwrap();
+        permission_writer.write_all(&[1]).unwrap();
+
+        assert_eq!(
+            wait_for_process_guard_wake(permission_reader.as_fd(), stop_reader.as_fd()).unwrap(),
+            ProcessGuardWake::Permission
+        );
+    }
+
+    #[test]
+    fn event_wait_wakes_when_stop_fd_becomes_readable() {
+        let (_permission_writer, permission_reader) = UnixStream::pair().unwrap();
+        let (mut stop_writer, stop_reader) = UnixStream::pair().unwrap();
+        stop_writer.write_all(&[1]).unwrap();
+
+        assert_eq!(
+            wait_for_process_guard_wake(permission_reader.as_fd(), stop_reader.as_fd()).unwrap(),
+            ProcessGuardWake::Stop
+        );
+    }
+}
