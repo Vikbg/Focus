@@ -3,9 +3,9 @@ set -euo pipefail
 
 scenario="${1:-}"
 case "$scenario" in
-  boot|reboot|suspend-resume|daemon-restart|multi-user) ;;
+  boot|reboot|suspend-resume|daemon-restart|multi-user|fanotify-permission) ;;
   *)
-    echo "usage: bash tests/vm/run-qemu.sh {boot|reboot|suspend-resume|daemon-restart|multi-user}" >&2
+    echo "usage: bash tests/vm/run-qemu.sh {boot|reboot|suspend-resume|daemon-restart|multi-user|fanotify-permission}" >&2
     exit 2
     ;;
 esac

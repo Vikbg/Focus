@@ -5,8 +5,8 @@ use std::{
 };
 
 use focus_core::{
-    Decision, PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId,
-    SessionState,
+    Decision, PolicySet, PolicyVersion, ProcessEnforcementPlan, ProcessPolicy, Profile, ProfileId,
+    RecoveryCodeHash, SessionId, SessionState,
 };
 use focus_platform::{GuardKind, PlatformBackend, PlatformFuture, PlatformResult};
 use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
@@ -44,6 +44,20 @@ impl PlatformBackend for PendingOnceBackend {
         Box::pin(PendingOnce { pending })
     }
 
+    fn arm_process_guard<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn verify_process_guard(
+        &mut self,
+        _expected_policy_digest: [u8; 32],
+    ) -> PlatformFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn arm_guard(&mut self, _guard: GuardKind) -> PlatformFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }
@@ -58,6 +72,7 @@ fn arming_session() -> StoredActiveSession {
             PolicyVersion(3),
             PolicySet::new(Decision::Allow),
         )
+        .with_process_policy(ProcessPolicy::strict(Vec::new(), Vec::new()))
         .snapshot(),
         1_000,
         2_000,

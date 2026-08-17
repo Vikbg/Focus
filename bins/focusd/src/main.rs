@@ -5,7 +5,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use focus_linux::LinuxBackend;
 use focus_storage::SqliteStore;
 use focusd::{DaemonRuntime, DaemonService, PeerPolicy, RuntimeConfig};
 
@@ -30,7 +29,7 @@ async fn run() -> Result<(), Box<dyn Error>> {
 
     create_parent(&database_path)?;
     let store = SqliteStore::open(&database_path)?;
-    let backend = LinuxBackend::default();
+    let backend = runtime_config.linux_backend();
     let mut service = DaemonService::new(store, backend);
     service.recover().await?;
 

@@ -5,8 +5,9 @@ use std::{
 };
 
 use focus_core::{
-    BootId, Decision, EmergencyClockSample, EmergencyRequest, PolicySet, PolicyVersion, Profile,
-    ProfileId, RecoveryCodeHash, SessionId, SessionState,
+    BootId, Decision, EmergencyClockSample, EmergencyRequest, PolicySet, PolicyVersion,
+    ProcessEnforcementPlan, ProcessPolicy, Profile, ProfileId, RecoveryCodeHash, SessionId,
+    SessionState,
 };
 use focus_platform::{FakeBackend, GuardKind, PlatformBackend, PlatformFuture};
 use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
@@ -34,6 +35,7 @@ fn stored_session(id: u128, state: SessionState) -> StoredActiveSession {
             PolicyVersion(3),
             PolicySet::new(Decision::Allow),
         )
+        .with_process_policy(ProcessPolicy::strict(Vec::new(), Vec::new()))
         .snapshot(),
         1_000,
         2_000,
@@ -55,8 +57,27 @@ impl PlatformBackend for RecordingBackend {
         Box::pin(async { Ok(()) })
     }
 
-    fn close_blocked_apps(&mut self) -> PlatformFuture<'_, ()> {
+    fn close_blocked_apps<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
         self.close += 1;
+        Box::pin(async { Ok(()) })
+    }
+
+    fn arm_process_guard<'a>(
+        &'a mut self,
+        _plan: &'a ProcessEnforcementPlan,
+    ) -> PlatformFuture<'a, ()> {
+        self.arm += 1;
+        Box::pin(async { Ok(()) })
+    }
+
+    fn verify_process_guard(
+        &mut self,
+        _expected_policy_digest: [u8; 32],
+    ) -> PlatformFuture<'_, ()> {
+        self.verify += 1;
         Box::pin(async { Ok(()) })
     }
 

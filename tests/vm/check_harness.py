@@ -2,19 +2,21 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCENARIOS = [
+TASK11_SCENARIOS = [
     "boot",
     "reboot",
     "suspend-resume",
     "daemon-restart",
     "multi-user",
 ]
+TASK12_SCENARIOS = ["fanotify-permission"]
 
 host = (ROOT / "tests/vm/run-qemu.sh").read_text(encoding="utf-8")
 guest = (ROOT / "tests/vm/guest-runner.sh").read_text(encoding="utf-8")
 testkit = (ROOT / "crates/focus-testkit/src/lib.rs").read_text(encoding="utf-8")
+fanotify_live = (ROOT / "platform/linux/tests/fanotify_live.rs").read_text(encoding="utf-8")
 
-for scenario in SCENARIOS:
+for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS:
     if scenario not in host:
         raise SystemExit(f"host VM runner is missing scenario {scenario}")
     if scenario not in guest:
@@ -48,9 +50,27 @@ required_guest_markers = [
     "systemctl reboot",
     "systemctl suspend",
     "FOCUS_ALLOWED_UID=0",
+    "FOCUS_CLI_PATH=",
+    "--test fanotify_live",
+    "--ignored",
+    "--nocapture",
 ]
 for marker in required_guest_markers:
     if marker not in guest:
         raise SystemExit(f"guest VM runner is missing {marker}")
+
+required_fanotify_fixtures = [
+    "fanotify_open_exec_permission_blocks_and_allows_real_exec",
+    "production_process_guard_measures_real_decisions_and_idle_wakeups",
+]
+for fixture in required_fanotify_fixtures:
+    if fixture not in fanotify_live:
+        raise SystemExit(f"fanotify live tests are missing fixture {fixture}")
+
+if "--exact" in guest:
+    raise SystemExit("fanotify VM scenario must execute all ignored fanotify_live fixtures")
+
+if "FOCUS_CLI_EXECUTABLE" in guest:
+    raise SystemExit("guest VM runner uses obsolete focusd CLI path configuration")
 
 print("Disposable Linux VM harness contract satisfied.")

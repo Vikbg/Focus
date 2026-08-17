@@ -13,7 +13,7 @@ fi
 
 scenario="${FOCUS_VM_SCENARIO:-$(cat /etc/focus-vm-scenario 2>/dev/null || true)}"
 case "$scenario" in
-  boot|reboot|suspend-resume|daemon-restart|multi-user) ;;
+  boot|reboot|suspend-resume|daemon-restart|multi-user|fanotify-permission) ;;
   *)
     echo "unknown Focus VM scenario: $scenario" >&2
     exit 2
@@ -83,7 +83,7 @@ run_daemon_restart_fixture() {
     FOCUS_DB_PATH="$database" \
     FOCUS_SOCKET_PATH="$socket" \
     FOCUS_ALLOWED_UID=0 \
-    FOCUS_CLI_EXECUTABLE="$focusctl_bin" \
+    FOCUS_CLI_PATH="$focusctl_bin" \
       "$focusd_bin" >>"$state_dir/focusd.log" 2>&1 &
     daemon_pid=$!
     wait_for_socket "$socket"
@@ -132,6 +132,23 @@ run_multi_user_fixture() {
   fi
 }
 
+run_fanotify_permission_fixture() {
+  command -v cargo >/dev/null 2>&1
+  target_dir="/var/tmp/focus-vm-target"
+  mkdir -p "$target_dir"
+
+  FOCUS_VM_SCENARIO=fanotify-permission \
+  CARGO_TARGET_DIR="$target_dir" \
+    cargo test \
+      --manifest-path /mnt/focus/Cargo.toml \
+      --locked \
+      -p focus-linux \
+      --test fanotify_live \
+      -- \
+      --ignored \
+      --nocapture
+}
+
 require_common_preflight
 boot_id="$(cat /proc/sys/kernel/random/boot_id)"
 log "scenario=$scenario boot_id=$boot_id"
@@ -173,6 +190,10 @@ case "$scenario" in
     ;;
   multi-user)
     run_multi_user_fixture
+    finish_success
+    ;;
+  fanotify-permission)
+    run_fanotify_permission_fixture
     finish_success
     ;;
 esac

@@ -5,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use focus_linux::LinuxBackend;
+
 const DEFAULT_CLI_PATH: &str = "/usr/bin/focusctl";
 
 /// Error returned when the daemon deployment identity is not explicit and valid.
@@ -64,6 +66,12 @@ impl RuntimeConfig {
         let allowed_uid = env::var("FOCUS_ALLOWED_UID").ok();
         let cli_executable = env::var("FOCUS_CLI_PATH").ok();
         Self::from_values(allowed_uid.as_deref(), cli_executable.as_deref())
+    }
+
+    /// Builds the production Linux backend for the configured protected UID.
+    #[must_use]
+    pub fn linux_backend(&self) -> LinuxBackend {
+        LinuxBackend::for_uid(self.allowed_uid)
     }
 
     #[must_use]

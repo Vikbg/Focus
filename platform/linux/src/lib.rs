@@ -1,14 +1,56 @@
 //! Linux-specific Focus enforcement backend.
 
 mod backend;
+mod executable_identity;
+mod execution_context;
+mod execution_fact_collector;
+mod execution_permission;
+mod fanotify_execution_channel;
+mod linux_process_control;
+mod nix_fanotify;
 mod preflight;
+mod process_closer;
+mod process_guard;
+mod rustix_pidfd;
 mod systemd;
 
 pub use backend::LinuxBackend;
+pub use executable_identity::{
+    ExecutableIdentityError, observe_executable, observe_open_executable,
+};
+pub use execution_context::{
+    ExecutionContextClassifier, ExecutionContextError, LinuxExecutionFacts,
+    enrich_execution_context,
+};
+pub use execution_fact_collector::{
+    ExecutionFactCollectionError, LinuxExecutionFactSource, ProcfsExecutionFactSource,
+    collect_execution_observation, collect_running_process, enrich_execution_target_context,
+};
+pub use execution_permission::{
+    ExecutionAttempt, ExecutionPermission, ExecutionPermissionChannel, ExecutionPermissionStep,
+    decide_execution_permission, process_next_execution_permission,
+};
+pub use fanotify_execution_channel::{
+    FanotifyChannelHealth, FanotifyExecutionChannel, FanotifyExecutionEvent,
+    FanotifyPermissionSource,
+};
+pub use linux_process_control::{
+    LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
+};
+pub use nix_fanotify::NixFanotifyPermissionSource;
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
 };
+pub use process_closer::{
+    ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
+    close_blocked_processes,
+};
+pub use process_guard::{
+    FailClosedProcessGuard, ProcessGuardControl, ProcessGuardError, ProcessGuardMetrics,
+    ProductionProcessGuard,
+};
+pub use rustix_pidfd::RustixPidfdOps;
 
 use std::{
     error::Error,

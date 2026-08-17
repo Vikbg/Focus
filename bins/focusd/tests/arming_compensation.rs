@@ -5,8 +5,8 @@ use std::{
 };
 
 use focus_core::{
-    Decision, PolicySet, PolicyVersion, Profile, ProfileId, RecoveryCodeHash, SessionId,
-    SessionState,
+    Decision, PolicySet, PolicyVersion, ProcessPolicy, Profile, ProfileId, RecoveryCodeHash,
+    SessionId, SessionState,
 };
 use focus_platform::{FakeBackend, GuardKind};
 use focus_storage::{FocusStore, SqliteStore, StoredActiveSession};
@@ -40,6 +40,7 @@ fn session(id: u128) -> StoredActiveSession {
             PolicyVersion(3),
             PolicySet::new(Decision::Allow),
         )
+        .with_process_policy(ProcessPolicy::strict(Vec::new(), Vec::new()))
         .snapshot(),
         1_000,
         2_000,
@@ -106,10 +107,15 @@ fn every_verification_failure_compensates_all_armed_guards_in_reverse_order() {
 #[test]
 fn compensation_is_idempotent_and_never_double_disarms_successful_steps() {
     let mut backend = FakeBackend::default();
+    let active = session(519);
+    let process_plan = active
+        .policy_snapshot()
+        .process_enforcement_plan()
+        .expect("process-aware fixture must provide an enforcement plan");
 
     {
         let mut coordinator = ArmingCoordinator::new(&mut backend);
-        block_on_ready(coordinator.arm_guard(GuardKind::Process)).unwrap();
+        block_on_ready(coordinator.arm_process_guard(&process_plan)).unwrap();
         block_on_ready(coordinator.arm_guard(GuardKind::Network)).unwrap();
 
         let first = block_on_ready(coordinator.compensate());
@@ -208,6 +214,10 @@ fn crash_after_platform_effect_before_followup_state_write_is_reconciled_idempot
     assert_eq!(
         backend.armed(),
         &[GuardKind::Network, GuardKind::Browser, GuardKind::Privilege]
+    );
+    assert_eq!(
+        backend.process_policy_digest(),
+        Some(active.policy_sha256())
     );
     for guard in GUARDS {
         assert!(backend.guard_is_armed(guard));
