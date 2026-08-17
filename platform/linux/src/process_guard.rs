@@ -153,9 +153,7 @@ impl ProcessGuardMetricCounters {
     fn snapshot(&self) -> ProcessGuardMetrics {
         ProcessGuardMetrics {
             permission_decisions: self.permission_decisions.load(Ordering::Relaxed),
-            total_decision_latency_nanos: self
-                .total_decision_latency_nanos
-                .load(Ordering::Relaxed),
+            total_decision_latency_nanos: self.total_decision_latency_nanos.load(Ordering::Relaxed),
             max_decision_latency_nanos: self.max_decision_latency_nanos.load(Ordering::Relaxed),
             watchdog_wakeups: self.watchdog_wakeups.load(Ordering::Relaxed),
         }
