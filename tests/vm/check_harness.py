@@ -10,13 +10,14 @@ TASK11_SCENARIOS = [
     "multi-user",
 ]
 TASK12_SCENARIOS = ["fanotify-permission"]
+TASK21_SCENARIOS = ["privilege-gate"]
 
 host = (ROOT / "tests/vm/run-qemu.sh").read_text(encoding="utf-8")
 guest = (ROOT / "tests/vm/guest-runner.sh").read_text(encoding="utf-8")
 testkit = (ROOT / "crates/focus-testkit/src/lib.rs").read_text(encoding="utf-8")
 fanotify_live = (ROOT / "platform/linux/tests/fanotify_live.rs").read_text(encoding="utf-8")
 
-for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS:
+for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS + TASK21_SCENARIOS:
     if scenario not in host:
         raise SystemExit(f"host VM runner is missing scenario {scenario}")
     if scenario not in guest:
