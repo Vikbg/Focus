@@ -13,7 +13,7 @@ fi
 
 scenario="${FOCUS_VM_SCENARIO:-$(cat /etc/focus-vm-scenario 2>/dev/null || true)}"
 case "$scenario" in
-  boot|reboot|suspend-resume|daemon-restart|multi-user|fanotify-permission) ;;
+  boot|reboot|suspend-resume|daemon-restart|multi-user|fanotify-permission|privilege-gate) ;;
   *)
     echo "unknown Focus VM scenario: $scenario" >&2
     exit 2
@@ -149,6 +149,11 @@ run_fanotify_permission_fixture() {
       --nocapture
 }
 
+run_privilege_gate_fixture() {
+  echo "privilege gate live fixture is not implemented" >&2
+  return 1
+}
+
 require_common_preflight
 boot_id="$(cat /proc/sys/kernel/random/boot_id)"
 log "scenario=$scenario boot_id=$boot_id"
@@ -194,6 +199,10 @@ case "$scenario" in
     ;;
   fanotify-permission)
     run_fanotify_permission_fixture
+    finish_success
+    ;;
+  privilege-gate)
+    run_privilege_gate_fixture
     finish_success
     ;;
 esac
