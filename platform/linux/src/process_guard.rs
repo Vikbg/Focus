@@ -232,9 +232,7 @@ impl ProductionProcessGuard {
         }
     }
 
-    fn watchdog_control(
-        &self,
-    ) -> LinuxProcessControl<ProcfsExecutionFactSource, RustixPidfdOps> {
+    fn watchdog_control(&self) -> LinuxProcessControl<ProcfsExecutionFactSource, RustixPidfdOps> {
         if let Some(enforced_uid) = self.enforced_uid {
             LinuxProcessControl::for_uid(
                 ProcfsExecutionFactSource,
