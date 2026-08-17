@@ -2,7 +2,6 @@ use std::{
     fs,
     future::Future,
     io,
-    os::fd::AsFd,
     path::Path,
     sync::{Arc, RwLock},
 };
@@ -13,12 +12,7 @@ use focus_protocol::{
     ResponseError,
 };
 use focus_storage::FocusStore;
-use nix::{
-    sys::{
-        socket::{getsockopt, sockopt::PeerCredentials},
-        stat::fstat,
-    },
-};
+use nix::sys::socket::{getsockopt, sockopt::PeerCredentials};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{UnixListener, UnixStream},
@@ -131,12 +125,19 @@ struct SocketIdentity {
 }
 
 impl SocketIdentity {
-    fn capture<Fd: AsFd>(listener: Fd) -> io::Result<Self> {
-        let metadata = fstat(listener)
-            .map_err(|error| io::Error::from_raw_os_error(error as i32))?;
+    fn capture(path: &Path) -> io::Result<Self> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_socket() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bound IPC path is not a Unix socket",
+            ));
+        }
         Ok(Self {
-            device: metadata.st_dev,
-            inode: metadata.st_ino,
+            device: metadata.dev(),
+            inode: metadata.ino(),
         })
     }
 
@@ -279,7 +280,7 @@ where
         F: Future<Output = ()>,
     {
         let listener = bind_production_socket(socket_path, policy)?;
-        let socket_identity = SocketIdentity::capture(&listener)?;
+        let socket_identity = SocketIdentity::capture(socket_path)?;
         listener.set_nonblocking(true)?;
         let listener = UnixListener::from_std(listener)?;
         let mut connections = JoinSet::new();
