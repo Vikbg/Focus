@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use focus_linux::LinuxBackend;
+use focus_linux::ProductionLinuxBackend;
 
 const DEFAULT_CLI_PATH: &str = "/usr/bin/focusctl";
 
@@ -70,8 +70,8 @@ impl RuntimeConfig {
 
     /// Builds the production Linux backend for the configured protected UID.
     #[must_use]
-    pub fn linux_backend(&self) -> LinuxBackend {
-        LinuxBackend::for_uid(self.allowed_uid)
+    pub fn linux_backend(&self) -> ProductionLinuxBackend {
+        ProductionLinuxBackend::for_uid(self.allowed_uid)
     }
 
     #[must_use]
