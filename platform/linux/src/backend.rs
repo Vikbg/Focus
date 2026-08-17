@@ -25,6 +25,14 @@ pub struct LinuxBackend<
     privilege_guard: V,
 }
 
+/// Fully wired production Linux backend for one explicitly protected UID.
+pub type ProductionLinuxBackend = LinuxBackend<
+    HostSystemProbe,
+    ProductionProcessControl,
+    ProductionProcessGuard,
+    ProductionPrivilegeGuard,
+>;
+
 impl Default
     for LinuxBackend<
         HostSystemProbe,
@@ -47,14 +55,7 @@ impl Default
     }
 }
 
-impl
-    LinuxBackend<
-        HostSystemProbe,
-        ProductionProcessControl,
-        ProductionProcessGuard,
-        ProductionPrivilegeGuard,
-    >
-{
+impl ProductionLinuxBackend {
     /// Creates the production backend scoped to one protected effective UID.
     #[must_use]
     pub fn for_uid(enforced_uid: u32) -> Self {
