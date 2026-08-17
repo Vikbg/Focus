@@ -15,3 +15,11 @@ fn new_production_guard_exposes_zeroed_performance_metrics() {
     assert_eq!(metrics.average_decision_latency(), None);
     assert_eq!(metrics.watchdog_wakeups(), 0);
 }
+
+#[test]
+fn isolated_mount_guard_can_bind_the_protected_uid() {
+    let guard = ProductionProcessGuard::for_mounts_and_uid(["/tmp/focus-guard-fixture"], 60_000);
+
+    assert_eq!(guard.enforced_uid(), Some(60_000));
+    assert_eq!(guard.metrics(), ProcessGuardMetrics::default());
+}
