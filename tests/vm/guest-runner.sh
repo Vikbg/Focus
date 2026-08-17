@@ -150,8 +150,20 @@ run_fanotify_permission_fixture() {
 }
 
 run_privilege_gate_fixture() {
-  echo "privilege gate live fixture is not implemented" >&2
-  return 1
+  command -v cargo >/dev/null 2>&1
+  target_dir="/var/tmp/focus-vm-target"
+  mkdir -p "$target_dir"
+
+  FOCUS_VM_SCENARIO=privilege-gate \
+  CARGO_TARGET_DIR="$target_dir" \
+    cargo test \
+      --manifest-path /mnt/focus/Cargo.toml \
+      --locked \
+      -p focus-linux \
+      --test privilege_gate_live \
+      -- \
+      --ignored \
+      --nocapture
 }
 
 require_common_preflight
