@@ -12,6 +12,7 @@ mod nix_fanotify;
 mod preflight;
 mod privilege_guard;
 mod privilege_session;
+mod privileged_broker;
 mod process_closer;
 mod process_guard;
 mod rustix_pidfd;
@@ -47,6 +48,10 @@ pub use preflight::{
     preflight, require_strict_preflight,
 };
 pub use privilege_guard::{PrivilegeGuardControl, PrivilegeGuardError, ProductionPrivilegeGuard};
+pub use privileged_broker::{
+    DockerServiceControl, LinuxPrivilegeBroker, PrivilegeBrokerControl, PrivilegeBrokerError,
+    ProductionPrivilegeBroker, SystemctlDockerServiceControl,
+};
 pub use process_closer::{
     ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
     close_blocked_processes,
