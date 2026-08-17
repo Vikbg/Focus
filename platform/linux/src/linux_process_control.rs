@@ -70,6 +70,7 @@ pub struct LinuxProcessControl<S, O> {
     source: S,
     handle_ops: O,
     classifier: ExecutionContextClassifier,
+    enforced_uid: Option<u32>,
 }
 
 impl<S, O> LinuxProcessControl<S, O> {
@@ -80,6 +81,23 @@ impl<S, O> LinuxProcessControl<S, O> {
             source,
             handle_ops,
             classifier,
+            enforced_uid: None,
+        }
+    }
+
+    /// Creates a Linux process-control adapter scoped to one protected effective UID.
+    #[must_use]
+    pub const fn for_uid(
+        source: S,
+        handle_ops: O,
+        classifier: ExecutionContextClassifier,
+        enforced_uid: u32,
+    ) -> Self {
+        Self {
+            source,
+            handle_ops,
+            classifier,
+            enforced_uid: Some(enforced_uid),
         }
     }
 
@@ -98,9 +116,28 @@ where
     type Handle = LinuxProcessHandle<O::Handle>;
 
     fn process_ids(&self) -> Result<Vec<u32>, ProcessCloseError> {
-        self.source
+        let process_ids = self
+            .source
             .process_ids()
-            .map_err(|_| ProcessCloseError::InventoryFailed)
+            .map_err(|_| ProcessCloseError::InventoryFailed)?;
+        let Some(enforced_uid) = self.enforced_uid else {
+            return Ok(process_ids);
+        };
+
+        let mut scoped = Vec::new();
+        for pid in process_ids {
+            let status = match self.source.status_text(pid) {
+                Ok(status) => status,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(_) => return Err(ProcessCloseError::InventoryFailed),
+            };
+            let effective_uid =
+                parse_effective_uid(&status).ok_or(ProcessCloseError::InventoryFailed)?;
+            if effective_uid == enforced_uid {
+                scoped.push(pid);
+            }
+        }
+        Ok(scoped)
     }
 
     fn observe_process(&self, pid: u32) -> Result<Option<RunningProcess>, ProcessCloseError> {
@@ -145,4 +182,11 @@ where
             .terminate_process(&handle.inner)
             .map_err(|_| ProcessCloseError::TerminationFailed(handle.lifetime.pid()))
     }
+}
+
+fn parse_effective_uid(status: &str) -> Option<u32> {
+    status.lines().find_map(|line| {
+        let values = line.strip_prefix("Uid:")?;
+        values.split_whitespace().nth(1)?.parse::<u32>().ok()
+    })
 }
