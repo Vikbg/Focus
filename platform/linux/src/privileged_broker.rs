@@ -15,16 +15,18 @@ const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegeBrokerError {
     UnsafeExecutor,
+    ActionNotApproved,
     ActionFailed,
 }
 
-/// Typed privileged-action controller.
+/// Typed privilege-action control owned by the Linux backend.
 pub trait PrivilegeBrokerControl {
     /// Executes one approved typed action.
     ///
     /// # Errors
     ///
-    /// Returns an error when the trusted executor cannot be established or the action fails.
+    /// Returns an error when the action is not approved, the trusted executor cannot be
+    /// established, or the action fails.
     fn execute(&mut self, action: PrivilegedAction) -> Result<(), PrivilegeBrokerError>;
 }
 
@@ -49,10 +51,21 @@ pub trait DockerServiceControl {
 
     /// Starts the fixed Docker service.
     ///
+    /// This operation is not approved by the Task 21 broker because starting a rootful Docker
+    /// daemon can expose a root-equivalent control socket. It remains a narrow dependency for the
+    /// Task 22 broker review.
+    ///
     /// # Errors
     ///
     /// Returns an error when the fixed service action fails.
     fn start_docker(&mut self) -> Result<(), PrivilegeBrokerError>;
+
+    /// Stops the fixed Docker service.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the fixed service action fails.
+    fn stop_docker(&mut self) -> Result<(), PrivilegeBrokerError>;
 }
 
 /// Linux broker that maps closed privileged actions to narrow service controls.
@@ -83,12 +96,16 @@ impl<C: Default> Default for LinuxPrivilegeBroker<C> {
 
 impl<C: DockerServiceControl> PrivilegeBrokerControl for LinuxPrivilegeBroker<C> {
     fn execute(&mut self, action: PrivilegedAction) -> Result<(), PrivilegeBrokerError> {
+        if action == PrivilegedAction::DockerStart {
+            return Err(PrivilegeBrokerError::ActionNotApproved);
+        }
         if !self.control.executor_is_trusted()? {
             return Err(PrivilegeBrokerError::UnsafeExecutor);
         }
 
         match action {
-            PrivilegedAction::DockerStart => self.control.start_docker(),
+            PrivilegedAction::DockerStart => Err(PrivilegeBrokerError::ActionNotApproved),
+            PrivilegedAction::DockerStop => self.control.stop_docker(),
         }
     }
 }
@@ -124,6 +141,24 @@ impl SystemctlDockerServiceControl {
             metadata.permissions().mode() & 0o777,
         ))
     }
+
+    fn run_service_action(&self, action: &str) -> Result<(), PrivilegeBrokerError> {
+        let Some(executable) = self.executable.as_deref() else {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        };
+        if !Self::trusted_path(executable)? {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        }
+        let status = Command::new(executable)
+            .args([action, DOCKER_SERVICE])
+            .status()
+            .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(PrivilegeBrokerError::ActionFailed)
+        }
+    }
 }
 
 impl DockerServiceControl for SystemctlDockerServiceControl {
@@ -135,21 +170,11 @@ impl DockerServiceControl for SystemctlDockerServiceControl {
     }
 
     fn start_docker(&mut self) -> Result<(), PrivilegeBrokerError> {
-        let Some(executable) = self.executable.as_deref() else {
-            return Err(PrivilegeBrokerError::UnsafeExecutor);
-        };
-        if !Self::trusted_path(executable)? {
-            return Err(PrivilegeBrokerError::UnsafeExecutor);
-        }
-        let status = Command::new(executable)
-            .args(["start", DOCKER_SERVICE])
-            .status()
-            .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(PrivilegeBrokerError::ActionFailed)
-        }
+        self.run_service_action("start")
+    }
+
+    fn stop_docker(&mut self) -> Result<(), PrivilegeBrokerError> {
+        self.run_service_action("stop")
     }
 }
 
