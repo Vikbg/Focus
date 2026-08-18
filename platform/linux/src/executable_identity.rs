@@ -148,3 +148,26 @@ fn hash_open_file(file: &File) -> io::Result<[u8; 32]> {
     }
     Ok(hasher.finalize().into())
 }
+
+#[cfg(test)]
+mod tests {
+    use focus_core::PrivilegeTransition;
+
+    use super::classify_privilege_transition;
+
+    #[test]
+    fn file_capabilities_take_priority_over_setid_metadata() {
+        assert_eq!(
+            classify_privilege_transition(0o6755, true),
+            PrivilegeTransition::FileCapabilities
+        );
+        assert_eq!(
+            classify_privilege_transition(0o4755, false),
+            PrivilegeTransition::SetId
+        );
+        assert_eq!(
+            classify_privilege_transition(0o0755, false),
+            PrivilegeTransition::None
+        );
+    }
+}
