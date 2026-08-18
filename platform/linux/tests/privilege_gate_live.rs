@@ -181,12 +181,12 @@ fn install_service_fixture() {
     .unwrap();
     assert!(command_status("systemctl", &["daemon-reload"]));
     assert!(command_status("systemctl", &["start", "focusd"]));
-    assert!(command_status("systemctl", &["stop", "docker.service"]));
+    assert!(command_status("systemctl", &["start", "docker.service"]));
     assert!(command_status(
         "systemctl",
         &["is-active", "--quiet", "focusd"]
     ));
-    assert!(!command_status(
+    assert!(command_status(
         "systemctl",
         &["is-active", "--quiet", "docker.service"]
     ));
@@ -293,10 +293,10 @@ fn assert_required_bypasses_are_blocked() {
 fn assert_typed_broker_still_succeeds(protected_uid: u32) {
     let mut backend = ProductionLinuxBackend::for_uid(protected_uid);
     assert_eq!(
-        block_on_ready(backend.execute_privileged_action(PrivilegedAction::DockerStart)),
+        block_on_ready(backend.execute_privileged_action(PrivilegedAction::DockerStop)),
         Ok(())
     );
-    assert!(command_status(
+    assert!(!command_status(
         "systemctl",
         &["is-active", "--quiet", "docker.service"]
     ));
