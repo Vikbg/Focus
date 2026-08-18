@@ -1,6 +1,6 @@
 use focus_core::{
-    Decision, ExecutableMatcher, ExecutionOrigin, ObservedExecutable, PackageIdentity, PackageKind,
-    ProcessEnforcementPlan, ProcessRule,
+    BlockReason, Decision, ExecutableMatcher, ExecutionOrigin, ObservedExecutable, PackageIdentity,
+    PackageKind, PrivilegeTransition, ProcessEnforcementPlan, ProcessRule,
 };
 
 const BLOCKED_DIGEST: [u8; 32] = [0x42; 32];
@@ -63,6 +63,29 @@ fn newly_built_binary_inside_trusted_workspace_can_run_when_classifiable() {
     .with_origin(ExecutionOrigin::IdeChild);
 
     assert_eq!(plan.decide(&built), Decision::Allow);
+}
+
+#[test]
+fn privilege_elevating_binary_inside_trusted_workspace_fails_closed() {
+    let plan = strict_plan();
+
+    for transition in [
+        PrivilegeTransition::SetId,
+        PrivilegeTransition::FileCapabilities,
+    ] {
+        let privileged = native(
+            "/home/student/code/target/debug/privileged-helper",
+            9,
+            402,
+            OTHER_DIGEST,
+        )
+        .with_privilege_transition(transition);
+
+        assert_eq!(
+            plan.decide(&privileged),
+            Decision::FailClosed(BlockReason::SecurityInvariant)
+        );
+    }
 }
 
 #[test]
