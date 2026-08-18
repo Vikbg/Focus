@@ -235,21 +235,9 @@ mod tests {
 
     #[test]
     fn protected_users_saved_or_fs_root_uid_is_rejected() {
-        for (pid, uids) in [
-            (107, [1000, 1000, 0, 1000]),
-            (108, [1000, 1000, 1000, 0]),
-        ] {
+        for (pid, uids) in [(107, [1000, 1000, 0, 1000]), (108, [1000, 1000, 1000, 0])] {
             let fixture = ProcFixture::new();
-            fixture.add_process_status(
-                pid,
-                uids,
-                [1000; 4],
-                &[1000],
-                0,
-                0,
-                0,
-                u32::MAX,
-            );
+            fixture.add_process_status(pid, uids, [1000; 4], &[1000], 0, 0, 0, u32::MAX);
 
             assert!(reject_existing_privileged_sessions_at(&fixture.root, 1000).is_err());
         }
@@ -262,16 +250,7 @@ mod tests {
             (110, [1000; 4], vec![1000, 0]),
         ] {
             let fixture = ProcFixture::new();
-            fixture.add_process_status(
-                pid,
-                [1000; 4],
-                gids,
-                &groups,
-                0,
-                0,
-                0,
-                u32::MAX,
-            );
+            fixture.add_process_status(pid, [1000; 4], gids, &groups, 0, 0, 0, u32::MAX);
 
             assert!(reject_existing_privileged_sessions_at(&fixture.root, 1000).is_err());
         }
@@ -279,11 +258,9 @@ mod tests {
 
     #[test]
     fn protected_users_permitted_or_effective_capability_is_rejected() {
-        for (pid, cap_permitted, cap_effective, cap_ambient) in [
-            (111, 1, 0, 0),
-            (112, 1, 1, 0),
-            (113, 1, 1, 1),
-        ] {
+        for (pid, cap_permitted, cap_effective, cap_ambient) in
+            [(111, 1, 0, 0), (112, 1, 1, 0), (113, 1, 1, 1)]
+        {
             let fixture = ProcFixture::new();
             fixture.add_process_status(
                 pid,
