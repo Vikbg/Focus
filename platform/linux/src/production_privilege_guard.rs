@@ -1,6 +1,5 @@
 use std::{
-    fs,
-    io,
+    fs, io,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::Path,
 };
@@ -8,8 +7,7 @@ use std::{
 use nix::unistd::{Uid, User};
 
 use crate::privilege_guard::{
-    PrivilegeGuardControl, PrivilegeGuardError,
-    ProductionPrivilegeGuard as SudoPrivilegeGuard,
+    PrivilegeGuardControl, PrivilegeGuardError, ProductionPrivilegeGuard as SudoPrivilegeGuard,
 };
 
 const PAM_LOGIN_CONFIG_PATH: &str = "/etc/pam.d/sudo-i";
@@ -166,11 +164,7 @@ mod tests {
             fs::create_dir(&root).unwrap();
             fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
             let pam_login = root.join("sudo-i");
-            fs::write(
-                &pam_login,
-                format!("#%PAM-1.0\n{RULE}\n@include sudo\n"),
-            )
-            .unwrap();
+            fs::write(&pam_login, format!("#%PAM-1.0\n{RULE}\n@include sudo\n")).unwrap();
             fs::set_permissions(&pam_login, fs::Permissions::from_mode(0o644)).unwrap();
             let owner_uid = fs::metadata(&root).unwrap().uid();
             Self {
