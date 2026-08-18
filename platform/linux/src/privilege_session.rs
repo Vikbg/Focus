@@ -6,6 +6,12 @@ pub(crate) enum PrivilegeSessionError {
     ExistingPrivilegedSession,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProcessPrivilegeState {
+    real_uid: u32,
+    privileged: bool,
+}
+
 fn read_process_file(process: &Path, name: &str) -> Result<Option<String>, PrivilegeSessionError> {
     match fs::read_to_string(process.join(name)) {
         Ok(content) => Ok(Some(content)),
@@ -19,23 +25,65 @@ fn read_process_file(process: &Path, name: &str) -> Result<Option<String>, Privi
     }
 }
 
-fn real_and_effective_uid(status: &str) -> Result<(u32, u32), PrivilegeSessionError> {
-    let fields = status
+fn status_value<'a>(status: &'a str, label: &str) -> Result<&'a str, PrivilegeSessionError> {
+    status
         .lines()
-        .find_map(|line| line.strip_prefix("Uid:"))
-        .ok_or(PrivilegeSessionError::InspectionFailed)?;
-    let mut fields = fields.split_whitespace();
-    let real_uid = fields
-        .next()
-        .ok_or(PrivilegeSessionError::InspectionFailed)?
-        .parse()
-        .map_err(|_| PrivilegeSessionError::InspectionFailed)?;
-    let effective_uid = fields
-        .next()
-        .ok_or(PrivilegeSessionError::InspectionFailed)?
-        .parse()
-        .map_err(|_| PrivilegeSessionError::InspectionFailed)?;
-    Ok((real_uid, effective_uid))
+        .find_map(|line| line.strip_prefix(label))
+        .ok_or(PrivilegeSessionError::InspectionFailed)
+}
+
+fn id_quartet(status: &str, label: &str) -> Result<[u32; 4], PrivilegeSessionError> {
+    let mut fields = status_value(status, label)?.split_whitespace();
+    let mut ids = [0_u32; 4];
+    for id in &mut ids {
+        *id = fields
+            .next()
+            .ok_or(PrivilegeSessionError::InspectionFailed)?
+            .parse()
+            .map_err(|_| PrivilegeSessionError::InspectionFailed)?;
+    }
+    if fields.next().is_some() {
+        return Err(PrivilegeSessionError::InspectionFailed);
+    }
+    Ok(ids)
+}
+
+fn has_root_supplementary_group(status: &str) -> Result<bool, PrivilegeSessionError> {
+    status_value(status, "Groups:")?
+        .split_whitespace()
+        .try_fold(false, |has_root, field| {
+            let group = field
+                .parse::<u32>()
+                .map_err(|_| PrivilegeSessionError::InspectionFailed)?;
+            Ok(has_root || group == 0)
+        })
+}
+
+fn capability_set(status: &str, label: &str) -> Result<u64, PrivilegeSessionError> {
+    let value = status_value(status, label)?.trim();
+    if value.is_empty() || value.split_whitespace().count() != 1 {
+        return Err(PrivilegeSessionError::InspectionFailed);
+    }
+    u64::from_str_radix(value, 16).map_err(|_| PrivilegeSessionError::InspectionFailed)
+}
+
+fn process_privilege_state(status: &str) -> Result<ProcessPrivilegeState, PrivilegeSessionError> {
+    let uids = id_quartet(status, "Uid:")?;
+    let gids = id_quartet(status, "Gid:")?;
+    let root_group = has_root_supplementary_group(status)?;
+    let cap_permitted = capability_set(status, "CapPrm:")?;
+    let cap_effective = capability_set(status, "CapEff:")?;
+    let cap_ambient = capability_set(status, "CapAmb:")?;
+
+    Ok(ProcessPrivilegeState {
+        real_uid: uids[0],
+        privileged: uids.contains(&0)
+            || gids.contains(&0)
+            || root_group
+            || cap_permitted != 0
+            || cap_effective != 0
+            || cap_ambient != 0,
+    })
 }
 
 pub(crate) fn reject_existing_privileged_sessions_at(
@@ -57,11 +105,11 @@ pub(crate) fn reject_existing_privileged_sessions_at(
         let Some(status) = read_process_file(&process, "status")? else {
             continue;
         };
-        let (real_uid, effective_uid) = real_and_effective_uid(&status)?;
-        if effective_uid != 0 {
+        let privilege = process_privilege_state(&status)?;
+        if !privilege.privileged {
             continue;
         }
-        if real_uid == protected_uid {
+        if privilege.real_uid == protected_uid {
             return Err(PrivilegeSessionError::ExistingPrivilegedSession);
         }
 
