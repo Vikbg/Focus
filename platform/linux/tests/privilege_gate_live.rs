@@ -16,6 +16,7 @@ const FIXTURE_USER: &str = "focuspriv";
 const FIXTURE_PASSWORD: &str = "focus-task21-fixture-password";
 const SUDOERS_PATH: &str = "/etc/sudoers.d/focus-task21";
 const PAM_PATH: &str = "/etc/pam.d/sudo";
+const PAM_LOGIN_PATH: &str = "/etc/pam.d/sudo-i";
 const DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
 const SERVICE_PATH: &str = "/etc/systemd/system/focusd.service";
 const DOCKER_SERVICE_PATH: &str = "/etc/systemd/system/docker.service";
@@ -137,12 +138,18 @@ fn pam_with_required_account_rule(original: &str) -> String {
     format!("{PAM_RULE}\n{original}")
 }
 
-fn install_sudo_fixture() -> String {
-    let original_pam = fs::read_to_string(PAM_PATH).unwrap();
-    let configured_pam = pam_with_required_account_rule(&original_pam);
-    if configured_pam != original_pam {
-        fs::write(PAM_PATH, configured_pam).unwrap();
+fn install_pam_rule(path: &str) -> String {
+    let original = fs::read_to_string(path).unwrap();
+    let configured = pam_with_required_account_rule(&original);
+    if configured != original {
+        fs::write(path, configured).unwrap();
     }
+    original
+}
+
+fn install_sudo_fixture() -> (String, String) {
+    let original_pam = install_pam_rule(PAM_PATH);
+    let original_pam_login = install_pam_rule(PAM_LOGIN_PATH);
 
     fs::write(
         SUDOERS_PATH,
@@ -157,7 +164,7 @@ fn install_sudo_fixture() -> String {
     fs::create_dir_all("/var/lib/focus").unwrap();
     fs::write(DENY_LIST_PATH, "").unwrap();
     fs::set_permissions(DENY_LIST_PATH, fs::Permissions::from_mode(0o600)).unwrap();
-    original_pam
+    (original_pam, original_pam_login)
 }
 
 fn install_service_fixture() {
@@ -203,6 +210,7 @@ fn install_nft_fixture() {
 struct VmFixture {
     protected_uid: u32,
     original_pam: String,
+    original_pam_login: String,
 }
 
 impl VmFixture {
@@ -223,12 +231,13 @@ impl VmFixture {
         }
 
         let protected_uid = install_fixture_user();
-        let original_pam = install_sudo_fixture();
+        let (original_pam, original_pam_login) = install_sudo_fixture();
         install_service_fixture();
         install_nft_fixture();
         Self {
             protected_uid,
             original_pam,
+            original_pam_login,
         }
     }
 }
@@ -237,6 +246,7 @@ impl Drop for VmFixture {
     fn drop(&mut self) {
         let _ = fs::write(DENY_LIST_PATH, "");
         let _ = fs::write(PAM_PATH, &self.original_pam);
+        let _ = fs::write(PAM_LOGIN_PATH, &self.original_pam_login);
         let _ = fs::remove_file(SUDOERS_PATH);
         let _ = Command::new("nft")
             .args(["delete", "table", "inet", NFT_TABLE])
@@ -261,6 +271,7 @@ impl Drop for VmFixture {
 }
 
 fn assert_required_bypasses_are_blocked() {
+    assert_sudo_blocked(&["-i", "true"]);
     assert_sudo_blocked(&["-s", "touch", "/var/tmp/focus-task21-shell"]);
     assert_sudo_blocked(&["bash", "-c", "touch /var/tmp/focus-task21-bash"]);
     assert_sudo_blocked(&["sh", "-c", "touch /var/tmp/focus-task21-sh"]);
