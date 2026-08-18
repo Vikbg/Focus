@@ -21,6 +21,7 @@ privilege_ci_path = ROOT / ".github/workflows/privilege-gate-live.yml"
 service_path = ROOT / "platform/linux/systemd/focusd.service"
 service_live_path = ROOT / "tests/vm/systemd-service-live.sh"
 service_ci_path = ROOT / ".github/workflows/systemd-service-live.yml"
+reboot_ci_path = ROOT / ".github/workflows/systemd-reboot-live.yml"
 
 for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS + TASK21_SCENARIOS:
     if scenario not in host:
@@ -40,6 +41,8 @@ required_host_markers = [
     'qemu_pid=""',
     'kill "$qemu_pid"',
     'wait "$qemu_pid"',
+    "packages:",
+    "nftables",
 ]
 for marker in required_host_markers:
     if marker not in host:
@@ -99,6 +102,8 @@ required_service_live_markers = [
     "stat -c '%u:%g %a' /etc/focus/focusd.env",
     "stat -c '%u:%g %a' /run/focus",
     "stat -c '%u:%g %a' /var/lib/focus",
+    "$repo_root/.focus-vm-bin/focusd",
+    "$repo_root/.focus-vm-bin/focusctl",
 ]
 for marker in required_service_live_markers:
     if marker not in service_live:
@@ -150,6 +155,24 @@ required_service_ci_markers = [
 for marker in required_service_ci_markers:
     if marker not in service_ci:
         raise SystemExit(f"systemd service live CI workflow is missing {marker}")
+
+if not reboot_ci_path.is_file():
+    raise SystemExit("systemd reboot live CI workflow is missing")
+reboot_ci = reboot_ci_path.read_text(encoding="utf-8")
+required_reboot_ci_markers = [
+    "name: Systemd reboot live",
+    "runs-on: ubuntu-24.04",
+    "qemu-system-x86",
+    "cloud-image-utils",
+    "ubuntu-24.04-server-cloudimg-amd64.img",
+    "6e40c07ae715f744f84af0bec76415cc1987dd115b4b8de437818561f01a3733",
+    ".focus-vm-bin",
+    "FOCUS_VM_BASE_IMAGE=",
+    "tests/vm/run-qemu.sh reboot",
+]
+for marker in required_reboot_ci_markers:
+    if marker not in reboot_ci:
+        raise SystemExit(f"systemd reboot live CI workflow is missing {marker}")
 
 if not service_path.is_file():
     raise SystemExit("focusd systemd service definition is missing")
