@@ -113,11 +113,50 @@ mod tests {
         }
 
         fn add_process(&self, pid: u32, real_uid: u32, effective_uid: u32, login_uid: u32) {
+            self.add_process_status(
+                pid,
+                [real_uid, effective_uid, effective_uid, effective_uid],
+                [real_uid, real_uid, real_uid, real_uid],
+                &[real_uid],
+                0,
+                0,
+                0,
+                login_uid,
+            );
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn add_process_status(
+            &self,
+            pid: u32,
+            uids: [u32; 4],
+            gids: [u32; 4],
+            groups: &[u32],
+            cap_permitted: u64,
+            cap_effective: u64,
+            cap_ambient: u64,
+            login_uid: u32,
+        ) {
             let process = self.root.join(pid.to_string());
             fs::create_dir(&process).unwrap();
+            let groups = groups
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(" ");
             fs::write(
                 process.join("status"),
-                format!("Name:\tfixture\nUid:\t{real_uid}\t{effective_uid}\t{effective_uid}\t{effective_uid}\n"),
+                format!(
+                    "Name:\tfixture\nUid:\t{}\t{}\t{}\t{}\nGid:\t{}\t{}\t{}\t{}\nGroups:\t{groups}\nCapPrm:\t{cap_permitted:016x}\nCapEff:\t{cap_effective:016x}\nCapAmb:\t{cap_ambient:016x}\n",
+                    uids[0],
+                    uids[1],
+                    uids[2],
+                    uids[3],
+                    gids[0],
+                    gids[1],
+                    gids[2],
+                    gids[3],
+                ),
             )
             .unwrap();
             fs::write(process.join("loginuid"), format!("{login_uid}\n")).unwrap();
@@ -144,6 +183,73 @@ mod tests {
         fixture.add_process(106, 1000, 0, u32::MAX);
 
         assert!(reject_existing_privileged_sessions_at(&fixture.root, 1000).is_err());
+    }
+
+    #[test]
+    fn protected_users_saved_or_fs_root_uid_is_rejected() {
+        for (pid, uids) in [
+            (107, [1000, 1000, 0, 1000]),
+            (108, [1000, 1000, 1000, 0]),
+        ] {
+            let fixture = ProcFixture::new();
+            fixture.add_process_status(
+                pid,
+                uids,
+                [1000; 4],
+                &[1000],
+                0,
+                0,
+                0,
+                u32::MAX,
+            );
+
+            assert!(reject_existing_privileged_sessions_at(&fixture.root, 1000).is_err());
+        }
+    }
+
+    #[test]
+    fn protected_users_root_group_privilege_is_rejected() {
+        for (pid, gids, groups) in [
+            (109, [1000, 0, 1000, 1000], vec![1000]),
+            (110, [1000; 4], vec![1000, 0]),
+        ] {
+            let fixture = ProcFixture::new();
+            fixture.add_process_status(
+                pid,
+                [1000; 4],
+                gids,
+                &groups,
+                0,
+                0,
+                0,
+                u32::MAX,
+            );
+
+            assert!(reject_existing_privileged_sessions_at(&fixture.root, 1000).is_err());
+        }
+    }
+
+    #[test]
+    fn protected_users_permitted_or_effective_capability_is_rejected() {
+        for (pid, cap_permitted, cap_effective, cap_ambient) in [
+            (111, 1, 0, 0),
+            (112, 1, 1, 0),
+            (113, 1, 1, 1),
+        ] {
+            let fixture = ProcFixture::new();
+            fixture.add_process_status(
+                pid,
+                [1000; 4],
+                [1000; 4],
+                &[1000],
+                cap_permitted,
+                cap_effective,
+                cap_ambient,
+                u32::MAX,
+            );
+
+            assert!(reject_existing_privileged_sessions_at(&fixture.root, 1000).is_err());
+        }
     }
 
     #[test]
