@@ -1,6 +1,7 @@
 use focus_linux::{
-    FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE, FocusNftablesControl, FocusNftablesError,
-    FocusNftablesTransaction, reload_focus_nftables,
+    FOCUS_NFT_BLOCKED_IPV4_SET, FOCUS_NFT_BLOCKED_IPV6_SET, FOCUS_NFT_FAMILY,
+    FOCUS_NFT_OUTPUT_CHAIN, FOCUS_NFT_TABLE, FocusNftablesControl, FocusNftablesError,
+    FocusNftablesTransaction, SystemNftablesControl, reload_focus_nftables,
 };
 
 #[derive(Debug)]
@@ -28,13 +29,30 @@ impl FocusNftablesControl for RecordingNftablesControl {
 #[test]
 fn focus_transaction_is_namespaced_and_never_flushes_the_global_ruleset() {
     let transaction = FocusNftablesTransaction::new();
-    let script = transaction.render();
+    let script = transaction.replacement_script();
 
     assert_eq!(FOCUS_NFT_FAMILY, "inet");
     assert_eq!(FOCUS_NFT_TABLE, "focus");
-    assert!(script.contains("table inet focus"));
+    assert!(script.starts_with("destroy table inet focus\n"));
+    assert!(script.contains("table inet focus {"));
     assert!(!script.contains("flush ruleset"));
     assert!(!script.contains("delete ruleset"));
+}
+
+#[test]
+fn focus_transaction_declares_fixed_chain_and_sets() {
+    let transaction = FocusNftablesTransaction::new();
+    let script = transaction.render();
+
+    assert_eq!(FOCUS_NFT_OUTPUT_CHAIN, "output");
+    assert_eq!(FOCUS_NFT_BLOCKED_IPV4_SET, "blocked_ipv4");
+    assert_eq!(FOCUS_NFT_BLOCKED_IPV6_SET, "blocked_ipv6");
+    assert!(script.contains("set blocked_ipv4"));
+    assert!(script.contains("type ipv4_addr"));
+    assert!(script.contains("set blocked_ipv6"));
+    assert!(script.contains("type ipv6_addr"));
+    assert!(script.contains("chain output"));
+    assert!(script.contains("hook output"));
 }
 
 #[test]
@@ -45,6 +63,11 @@ fn focus_reload_only_targets_focus_owned_objects() {
         assert_eq!(command.family(), FOCUS_NFT_FAMILY);
         assert_eq!(command.table(), FOCUS_NFT_TABLE);
     }
+}
+
+#[test]
+fn production_control_has_no_caller_selected_table_scope() {
+    let _control = SystemNftablesControl::default();
 }
 
 #[test]
