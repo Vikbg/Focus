@@ -18,6 +18,7 @@ testkit = (ROOT / "crates/focus-testkit/src/lib.rs").read_text(encoding="utf-8")
 fanotify_live = (ROOT / "platform/linux/tests/fanotify_live.rs").read_text(encoding="utf-8")
 privilege_live_path = ROOT / "platform/linux/tests/privilege_gate_live.rs"
 privilege_ci_path = ROOT / ".github/workflows/privilege-gate-live.yml"
+service_path = ROOT / "platform/linux/systemd/focusd.service"
 
 for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS + TASK21_SCENARIOS:
     if scenario not in host:
@@ -96,6 +97,26 @@ required_privilege_ci_markers = [
 for marker in required_privilege_ci_markers:
     if marker not in privilege_ci:
         raise SystemExit(f"privilege gate live CI workflow is missing {marker}")
+
+if not service_path.is_file():
+    raise SystemExit("focusd systemd service definition is missing")
+service = service_path.read_text(encoding="utf-8")
+required_service_markers = [
+    "User=root",
+    "Group=root",
+    "ExecStart=/usr/libexec/focus/focusd",
+    "EnvironmentFile=/etc/focus/focusd.env",
+    "Restart=on-failure",
+    "RuntimeDirectory=focus",
+    "RuntimeDirectoryMode=0750",
+    "StateDirectory=focus",
+    "StateDirectoryMode=0700",
+    "UMask=0077",
+    "WantedBy=multi-user.target",
+]
+for marker in required_service_markers:
+    if marker not in service:
+        raise SystemExit(f"focusd systemd service is missing {marker}")
 
 if "--exact" in guest:
     raise SystemExit("fanotify VM scenario must execute all ignored fanotify_live fixtures")
