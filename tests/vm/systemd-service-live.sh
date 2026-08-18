@@ -71,17 +71,26 @@ wait_for_restarted_service() {
   return 1
 }
 
-mkdir -p "$target_dir"
-CARGO_TARGET_DIR="$target_dir" cargo build \
-  --manifest-path "$repo_root/Cargo.toml" \
-  --locked \
-  -p focusd \
-  -p focusctl
+prebuilt_focusd="$repo_root/.focus-vm-bin/focusd"
+prebuilt_focusctl="$repo_root/.focus-vm-bin/focusctl"
+if [[ -x "$prebuilt_focusd" && -x "$prebuilt_focusctl" ]]; then
+  focusd_bin="$prebuilt_focusd"
+  focusctl_bin="$prebuilt_focusctl"
+else
+  command -v cargo >/dev/null 2>&1
+  mkdir -p "$target_dir"
+  CARGO_TARGET_DIR="$target_dir" cargo build \
+    --manifest-path "$repo_root/Cargo.toml" \
+    --locked \
+    -p focusd \
+    -p focusctl
+  focusd_bin="$target_dir/debug/focusd"
+  focusctl_bin="$target_dir/debug/focusctl"
+fi
 
-focusd_bin="$target_dir/debug/focusd"
-focusctl_bin="$target_dir/debug/focusctl"
 service_source="$repo_root/platform/linux/systemd/focusd.service"
 env_source="$target_dir/focusd.env"
+mkdir -p "$target_dir"
 
 printf '%s\n' \
   "FOCUS_ALLOWED_UID=$allowed_uid" \
