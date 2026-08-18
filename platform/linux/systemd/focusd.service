@@ -1,0 +1,21 @@
+[Unit]
+Description=Focus enforcement daemon
+Documentation=https://github.com/Vikbg/Focus
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/focus/focusd.env
+ExecStart=/usr/libexec/focus/focusd
+Restart=on-failure
+RestartSec=1s
+RuntimeDirectory=focus
+RuntimeDirectoryMode=0750
+StateDirectory=focus
+StateDirectoryMode=0700
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
