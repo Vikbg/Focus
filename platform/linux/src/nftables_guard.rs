@@ -196,13 +196,15 @@ impl SystemNftablesControl {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|_| FocusNftablesError::ApplyFailed)?;
-        let write_result = child.stdin.as_mut().ok_or(FocusNftablesError::ApplyFailed).and_then(
-            |stdin| {
+        let write_result = child
+            .stdin
+            .as_mut()
+            .ok_or(FocusNftablesError::ApplyFailed)
+            .and_then(|stdin| {
                 stdin
                     .write_all(script.as_bytes())
                     .map_err(|_| FocusNftablesError::ApplyFailed)
-            },
-        );
+            });
         drop(child.stdin.take());
         let status = child
             .wait()
