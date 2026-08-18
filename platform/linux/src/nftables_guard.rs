@@ -3,6 +3,37 @@ pub const FOCUS_NFT_FAMILY: &str = "inet";
 /// nftables table owned by Focus.
 pub const FOCUS_NFT_TABLE: &str = "focus";
 
+/// Error returned by Focus-owned nftables operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusNftablesError {
+    ApplyFailed,
+}
+
+/// Narrow nftables mutation authority limited to replacing the Focus-owned table.
+pub trait FocusNftablesControl {
+    /// Replaces the complete Focus-owned nftables table with the desired transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Focus-owned table cannot be replaced safely.
+    fn replace_focus_table(
+        &mut self,
+        transaction: &FocusNftablesTransaction,
+    ) -> Result<(), FocusNftablesError>;
+}
+
+/// Replaces only Focus-owned nftables state.
+///
+/// # Errors
+///
+/// Returns the underlying control error when the Focus table cannot be replaced safely.
+pub fn reload_focus_nftables<C: FocusNftablesControl>(
+    control: &mut C,
+    transaction: &FocusNftablesTransaction,
+) -> Result<(), FocusNftablesError> {
+    control.replace_focus_table(transaction)
+}
+
 /// One nftables command whose ownership scope is fixed to the Focus table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FocusNftablesCommand {
