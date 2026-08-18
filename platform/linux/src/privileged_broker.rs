@@ -104,8 +104,8 @@ impl<C: DockerServiceControl> PrivilegeBrokerControl for LinuxPrivilegeBroker<C>
                 }
                 self.control.stop_docker()
             }
-            PrivilegedAction::VpnConnect
-            | PrivilegedAction::VpnDisconnect
+            PrivilegedAction::VpnConnect { .. }
+            | PrivilegedAction::VpnDisconnect { .. }
             | PrivilegedAction::DockerStart => Err(PrivilegeBrokerError::ActionNotApproved),
         }
     }
