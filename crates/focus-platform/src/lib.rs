@@ -28,6 +28,7 @@ impl GuardKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegedAction {
     DockerStart,
+    DockerStop,
 }
 
 /// Error returned by an operating-system enforcement backend.
