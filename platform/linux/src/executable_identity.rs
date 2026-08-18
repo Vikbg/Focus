@@ -11,8 +11,11 @@ use std::{
 };
 
 use focus_core::{ExecutionOrigin, ObservedExecutable, PrivilegeTransition};
+use rustix::{fs::fgetxattr, io::Errno};
 use sha2::{Digest, Sha256};
 
+const FILE_CAPABILITY_BUFFER_BYTES: usize = 64;
+const FILE_CAPABILITY_XATTR: &str = "security.capability";
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
 const SET_ID_MASK: u32 = 0o6000;
 
@@ -63,8 +66,8 @@ impl From<io::Error> for ExecutableIdentityError {
 /// # Errors
 ///
 /// Returns an error if the path cannot be canonicalized or opened, the canonical path is not
-/// UTF-8, the target is not a regular file, the target has no execute permission bit, or the file
-/// cannot be read completely for hashing.
+/// UTF-8, the target is not a regular file, the target has no execute permission bit, privilege
+/// metadata cannot be inspected, or the file cannot be read completely for hashing.
 pub fn observe_executable(
     path: impl AsRef<Path>,
     origin: ExecutionOrigin,
@@ -81,14 +84,15 @@ pub fn observe_executable(
 
 /// Collects executable identity from an already-open kernel file descriptor.
 ///
-/// The file descriptor is cloned and all metadata and digest reads stay bound to that opened file
-/// description. The path is resolved through `/proc/self/fd` only to provide path context; it is
-/// never reopened to choose which bytes are hashed.
+/// The file descriptor is cloned and all metadata, privilege metadata, and digest reads stay bound
+/// to that opened file description. The path is resolved through `/proc/self/fd` only to provide
+/// path context; it is never reopened to choose which bytes are hashed.
 ///
 /// # Errors
 ///
 /// Returns an error if the descriptor cannot be cloned or resolved through procfs, the resolved
-/// path is not UTF-8, the target is not a regular executable file, or its bytes cannot be hashed.
+/// path is not UTF-8, the target is not a regular executable file, privilege metadata cannot be
+/// inspected, or its bytes cannot be hashed.
 pub fn observe_open_executable(
     fd: BorrowedFd<'_>,
     origin: ExecutionOrigin,
@@ -118,11 +122,7 @@ fn observe_file(
     if mode & 0o111 == 0 {
         return Err(ExecutableIdentityError::NotExecutable);
     }
-    let privilege_transition = if mode & SET_ID_MASK != 0 {
-        PrivilegeTransition::SetId
-    } else {
-        PrivilegeTransition::None
-    };
+    let privilege_transition = classify_privilege_transition(mode, has_file_capabilities(file)?);
 
     let digest = hash_open_file(file)?;
     Ok(ObservedExecutable::new(canonical_path)
@@ -130,6 +130,28 @@ fn observe_file(
         .with_digest(digest)
         .with_origin(origin)
         .with_privilege_transition(privilege_transition))
+}
+
+const fn classify_privilege_transition(
+    mode: u32,
+    has_file_capabilities: bool,
+) -> PrivilegeTransition {
+    if has_file_capabilities {
+        PrivilegeTransition::FileCapabilities
+    } else if mode & SET_ID_MASK != 0 {
+        PrivilegeTransition::SetId
+    } else {
+        PrivilegeTransition::None
+    }
+}
+
+fn has_file_capabilities(file: &File) -> Result<bool, ExecutableIdentityError> {
+    let mut value = [0_u8; FILE_CAPABILITY_BUFFER_BYTES];
+    match fgetxattr(file, FILE_CAPABILITY_XATTR, &mut value[..]) {
+        Ok(_) => Ok(true),
+        Err(error) if error == Errno::NODATA || error == Errno::OPNOTSUPP => Ok(false),
+        Err(error) => Err(io::Error::from_raw_os_error(error.raw_os_error()).into()),
+    }
 }
 
 fn hash_open_file(file: &File) -> io::Result<[u8; 32]> {
