@@ -1,10 +1,11 @@
 use std::{
     fs,
     future::Future,
+    io::Write,
     os::unix::fs::PermissionsExt,
     path::Path,
     pin::pin,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     task::{Context, Poll, Waker},
 };
 
@@ -12,6 +13,7 @@ use focus_linux::{PrivilegeGuardControl, ProductionLinuxBackend, ProductionPrivi
 use focus_platform::{PlatformBackend, PrivilegedAction};
 
 const FIXTURE_USER: &str = "focuspriv";
+const FIXTURE_PASSWORD: &str = "focus-task21-fixture-password";
 const SUDOERS_PATH: &str = "/etc/sudoers.d/focus-task21";
 const PAM_PATH: &str = "/etc/pam.d/sudo";
 const DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
@@ -53,6 +55,31 @@ fn run_sudo_as(arguments: &[&str]) -> Output {
     command.output().unwrap()
 }
 
+fn invalidate_sudo_ticket() {
+    assert!(command_status(
+        "runuser",
+        &["-u", FIXTURE_USER, "--", "sudo", "-K"]
+    ));
+}
+
+fn cache_sudo_ticket() -> Output {
+    let mut child = Command::new("runuser")
+        .args(["-u", FIXTURE_USER, "--", "sudo", "-S", "-v"])
+        .env("LC_ALL", "C")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(format!("{FIXTURE_PASSWORD}\n").as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
 fn assert_sudo_blocked(arguments: &[&str]) {
     let output = run_sudo_as(arguments);
     assert!(
@@ -68,6 +95,21 @@ fn install_fixture_user() -> u32 {
         "useradd",
         &["--create-home", "--shell", "/bin/bash", FIXTURE_USER]
     ));
+
+    let mut password = Command::new("chpasswd")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    password
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(format!("{FIXTURE_USER}:{FIXTURE_PASSWORD}\n").as_bytes())
+        .unwrap();
+    assert!(password.wait().unwrap().success());
+
     let output = Command::new("id")
         .args(["-u", FIXTURE_USER])
         .output()
@@ -104,7 +146,9 @@ fn install_sudo_fixture() -> String {
 
     fs::write(
         SUDOERS_PATH,
-        format!("{FIXTURE_USER} ALL=(ALL:ALL) NOPASSWD: ALL\n"),
+        format!(
+            "Defaults:{FIXTURE_USER} timestamp_type=global,timestamp_timeout=30\n{FIXTURE_USER} ALL=(ALL:ALL) ALL\n"
+        ),
     )
     .unwrap();
     fs::set_permissions(SUDOERS_PATH, fs::Permissions::from_mode(0o440)).unwrap();
@@ -164,6 +208,7 @@ struct VmFixture {
 impl VmFixture {
     fn new() -> Self {
         for command in [
+            "chpasswd",
             "id",
             "nft",
             "python3",
@@ -288,21 +333,32 @@ fn privilege_gate_blocks_unrestricted_sudo_paths() {
     assert_eq!(nix::unistd::geteuid().as_raw(), 0);
 
     let fixture = VmFixture::new();
+    invalidate_sudo_ticket();
+    assert!(
+        cache_sudo_ticket().status.success(),
+        "fixture user must authenticate and cache sudo before the Focus guard arms"
+    );
     assert!(
         run_sudo_as(&["true"]).status.success(),
-        "fixture user must have unrestricted sudo before the Focus guard arms"
+        "cached sudo ticket must authorize a noninteractive command before the Focus guard arms"
     );
 
     let mut guard = ProductionPrivilegeGuard::for_uid(fixture.protected_uid);
     guard.arm().unwrap();
     guard.verify().unwrap();
+    assert_sudo_blocked(&["true"]);
     assert_required_bypasses_are_blocked();
     assert_typed_broker_still_succeeds(fixture.protected_uid);
     guard.verify().unwrap();
 
     guard.disarm().unwrap();
+    invalidate_sudo_ticket();
+    assert!(
+        cache_sudo_ticket().status.success(),
+        "disarming the fixture must restore password-authenticated sudo"
+    );
     assert!(
         run_sudo_as(&["true"]).status.success(),
-        "disarming the fixture must restore sudo availability"
+        "disarming the fixture must restore cached sudo availability"
     );
 }
