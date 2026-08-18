@@ -67,7 +67,7 @@ pub use process_guard::{
     ProductionProcessGuard,
 };
 pub use production_privilege_guard::ProductionPrivilegeGuard;
-pub use rustix_pidfd::RustixPidOps;
+pub use rustix_pidfd::RustixPidfdOps;
 
 use std::{
     error::Error,
