@@ -27,6 +27,14 @@ pub enum PackageKind {
     Wine,
 }
 
+/// Privilege transition carried by an executable at exec time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrivilegeTransition {
+    None,
+    SetId,
+    FileCapabilities,
+}
+
 /// Stable package identity attached to an observed executable.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageIdentity {
@@ -66,6 +74,7 @@ pub struct ObservedExecutable {
     digest: Option<[u8; 32]>,
     package: Option<PackageIdentity>,
     origin: ExecutionOrigin,
+    privilege_transition: PrivilegeTransition,
     parent: Option<Box<ObservedExecutable>>,
 }
 
@@ -80,6 +89,7 @@ impl ObservedExecutable {
             digest: None,
             package: None,
             origin: ExecutionOrigin::Direct,
+            privilege_transition: PrivilegeTransition::None,
             parent: None,
         }
     }
@@ -110,6 +120,13 @@ impl ObservedExecutable {
     #[must_use]
     pub const fn with_origin(mut self, origin: ExecutionOrigin) -> Self {
         self.origin = origin;
+        self
+    }
+
+    /// Adds the privilege transition observed on the executable.
+    #[must_use]
+    pub const fn with_privilege_transition(mut self, transition: PrivilegeTransition) -> Self {
+        self.privilege_transition = transition;
         self
     }
 
@@ -151,6 +168,12 @@ impl ObservedExecutable {
     #[must_use]
     pub const fn origin(&self) -> ExecutionOrigin {
         self.origin
+    }
+
+    /// Returns the privilege transition attached to the executable.
+    #[must_use]
+    pub const fn privilege_transition(&self) -> PrivilegeTransition {
+        self.privilege_transition
     }
 
     /// Returns the direct parent identity when it was collected.
@@ -293,6 +316,10 @@ impl ProcessEnforcementPlan {
     /// Decides whether an observed executable may run.
     #[must_use]
     pub fn decide(&self, executable: &ObservedExecutable) -> Decision {
+        if executable.privilege_transition != PrivilegeTransition::None {
+            return Decision::FailClosed(BlockReason::SecurityInvariant);
+        }
+
         if let Some(rule) = self.rules.iter().find(|rule| rule.matches(executable)) {
             return rule.decision;
         }
