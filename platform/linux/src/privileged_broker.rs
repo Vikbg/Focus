@@ -9,6 +9,7 @@ use focus_platform::PrivilegedAction;
 
 const SYSTEMCTL_CANDIDATES: [&str; 2] = ["/usr/bin/systemctl", "/bin/systemctl"];
 const DOCKER_SERVICE: &str = "docker.service";
+const DOCKER_STOP_UNITS: [&str; 2] = ["docker.socket", DOCKER_SERVICE];
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 
 /// Error returned by the Linux typed privilege broker.
@@ -60,57 +61,111 @@ pub trait DockerServiceControl {
     /// Returns an error when the fixed service action fails.
     fn start_docker(&mut self) -> Result<(), PrivilegeBrokerError>;
 
-    /// Stops the fixed Docker service.
+    /// Stops every fixed Docker activation unit.
     ///
     /// # Errors
     ///
-    /// Returns an error when the fixed service action fails.
+    /// Returns an error when any fixed service or socket action fails.
     fn stop_docker(&mut self) -> Result<(), PrivilegeBrokerError>;
 }
 
-/// Linux broker that maps closed privileged actions to narrow service controls.
-#[derive(Debug)]
-pub struct LinuxPrivilegeBroker<C> {
-    control: C,
+/// Narrow provider-neutral VPN dependency used by the typed broker.
+pub trait VpnActionControl {
+    /// Connects one exact VPN identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the identity is not approved or the provider action fails.
+    fn connect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError>;
+
+    /// Disconnects one exact VPN identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the identity is not approved or the provider action fails.
+    fn disconnect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError>;
 }
 
-impl<C> LinuxPrivilegeBroker<C> {
-    /// Creates a broker from one narrow Docker service-control dependency.
+/// VPN control used until a provider-neutral manager is injected by the later VPN phase.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FailClosedVpnActionControl;
+
+impl VpnActionControl for FailClosedVpnActionControl {
+    fn connect_vpn(&mut self, _id: u128) -> Result<(), PrivilegeBrokerError> {
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    }
+
+    fn disconnect_vpn(&mut self, _id: u128) -> Result<(), PrivilegeBrokerError> {
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    }
+}
+
+/// Linux broker that maps closed privileged actions to narrow typed controls.
+#[derive(Debug)]
+pub struct LinuxPrivilegeBroker<D, V = FailClosedVpnActionControl> {
+    control: D,
+    vpn_control: V,
+}
+
+impl<D> LinuxPrivilegeBroker<D, FailClosedVpnActionControl> {
+    /// Creates a broker with Docker control and fail-closed VPN actions.
     #[must_use]
-    pub const fn new(control: C) -> Self {
-        Self { control }
+    pub const fn new(control: D) -> Self {
+        Self {
+            control,
+            vpn_control: FailClosedVpnActionControl,
+        }
+    }
+}
+
+impl<D, V> LinuxPrivilegeBroker<D, V> {
+    /// Creates a broker from explicit narrow Docker and VPN controls.
+    #[must_use]
+    pub const fn with_controls(control: D, vpn_control: V) -> Self {
+        Self {
+            control,
+            vpn_control,
+        }
     }
 
     /// Returns the Docker control for deterministic tests and diagnostics.
     #[must_use]
-    pub const fn control(&self) -> &C {
+    pub const fn control(&self) -> &D {
         &self.control
     }
+
+    /// Returns the VPN control for deterministic tests and diagnostics.
+    #[must_use]
+    pub const fn vpn_control(&self) -> &V {
+        &self.vpn_control
+    }
 }
 
-impl<C: Default> Default for LinuxPrivilegeBroker<C> {
+impl<D: Default, V: Default> Default for LinuxPrivilegeBroker<D, V> {
     fn default() -> Self {
-        Self::new(C::default())
+        Self::with_controls(D::default(), V::default())
     }
 }
 
-impl<C: DockerServiceControl> PrivilegeBrokerControl for LinuxPrivilegeBroker<C> {
+impl<D: DockerServiceControl, V: VpnActionControl> PrivilegeBrokerControl
+    for LinuxPrivilegeBroker<D, V>
+{
     fn execute(&mut self, action: PrivilegedAction) -> Result<(), PrivilegeBrokerError> {
-        if action == PrivilegedAction::DockerStart {
-            return Err(PrivilegeBrokerError::ActionNotApproved);
-        }
-        if !self.control.executor_is_trusted()? {
-            return Err(PrivilegeBrokerError::UnsafeExecutor);
-        }
-
         match action {
+            PrivilegedAction::VpnConnect { id } => self.vpn_control.connect_vpn(id),
+            PrivilegedAction::VpnDisconnect { id } => self.vpn_control.disconnect_vpn(id),
+            PrivilegedAction::DockerStop => {
+                if !self.control.executor_is_trusted()? {
+                    return Err(PrivilegeBrokerError::UnsafeExecutor);
+                }
+                self.control.stop_docker()
+            }
             PrivilegedAction::DockerStart => Err(PrivilegeBrokerError::ActionNotApproved),
-            PrivilegedAction::DockerStop => self.control.stop_docker(),
         }
     }
 }
 
-/// Production Docker control using only a fixed systemctl path and service name.
+/// Production Docker control using only a fixed systemctl path and fixed unit names.
 #[derive(Debug, Clone)]
 pub struct SystemctlDockerServiceControl {
     executable: Option<PathBuf>,
@@ -142,7 +197,7 @@ impl SystemctlDockerServiceControl {
         ))
     }
 
-    fn run_service_action(&self, action: &str) -> Result<(), PrivilegeBrokerError> {
+    fn run_unit_action(&self, action: &str, unit: &str) -> Result<(), PrivilegeBrokerError> {
         let Some(executable) = self.executable.as_deref() else {
             return Err(PrivilegeBrokerError::UnsafeExecutor);
         };
@@ -150,7 +205,7 @@ impl SystemctlDockerServiceControl {
             return Err(PrivilegeBrokerError::UnsafeExecutor);
         }
         let status = Command::new(executable)
-            .args([action, DOCKER_SERVICE])
+            .args([action, unit])
             .status()
             .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
         if status.success() {
@@ -170,20 +225,29 @@ impl DockerServiceControl for SystemctlDockerServiceControl {
     }
 
     fn start_docker(&mut self) -> Result<(), PrivilegeBrokerError> {
-        self.run_service_action("start")
+        self.run_unit_action("start", DOCKER_SERVICE)
     }
 
     fn stop_docker(&mut self) -> Result<(), PrivilegeBrokerError> {
-        self.run_service_action("stop")
+        for unit in DOCKER_STOP_UNITS {
+            self.run_unit_action("stop", unit)?;
+        }
+        Ok(())
     }
 }
 
 /// Production typed privilege broker.
-pub type ProductionPrivilegeBroker = LinuxPrivilegeBroker<SystemctlDockerServiceControl>;
+pub type ProductionPrivilegeBroker =
+    LinuxPrivilegeBroker<SystemctlDockerServiceControl, FailClosedVpnActionControl>;
 
 #[cfg(test)]
 mod tests {
-    use super::SystemctlDockerServiceControl;
+    use super::{DOCKER_STOP_UNITS, SystemctlDockerServiceControl};
+
+    #[test]
+    fn docker_stop_disables_socket_activation_before_the_service() {
+        assert_eq!(DOCKER_STOP_UNITS, ["docker.socket", "docker.service"]);
+    }
 
     #[test]
     fn trusted_executor_requires_root_owned_non_writable_executable_file() {

@@ -27,6 +27,8 @@ impl GuardKind {
 /// Closed set of privileged operations that may be brokered by the daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegedAction {
+    VpnConnect { id: u128 },
+    VpnDisconnect { id: u128 },
     DockerStart,
     DockerStop,
 }

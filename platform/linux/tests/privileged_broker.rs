@@ -1,6 +1,6 @@
 use focus_linux::{
     DockerServiceControl, LinuxPrivilegeBroker, PrivilegeBrokerControl, PrivilegeBrokerError,
-    ProductionPrivilegeBroker,
+    ProductionPrivilegeBroker, VpnActionControl,
 };
 use focus_platform::PrivilegedAction;
 
@@ -32,6 +32,83 @@ impl DockerServiceControl for RecordingDockerControl {
     }
 }
 
+#[derive(Debug, Default)]
+struct RecordingVpnControl {
+    connects: Vec<u128>,
+    disconnects: Vec<u128>,
+    fail: bool,
+}
+
+impl VpnActionControl for RecordingVpnControl {
+    fn connect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+        self.connects.push(id);
+        if self.fail {
+            Err(PrivilegeBrokerError::ActionFailed)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn disconnect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+        self.disconnects.push(id);
+        if self.fail {
+            Err(PrivilegeBrokerError::ActionFailed)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn vpn_actions_route_exact_typed_ids_to_the_vpn_control() {
+    let docker = RecordingDockerControl::default();
+    let vpn = RecordingVpnControl::default();
+    let mut broker = LinuxPrivilegeBroker::with_controls(docker, vpn);
+
+    assert_eq!(
+        broker.execute(PrivilegedAction::VpnConnect { id: 41 }),
+        Ok(())
+    );
+    assert_eq!(
+        broker.execute(PrivilegedAction::VpnDisconnect { id: 42 }),
+        Ok(())
+    );
+    assert_eq!(broker.vpn_control().connects, vec![41]);
+    assert_eq!(broker.vpn_control().disconnects, vec![42]);
+    assert_eq!(broker.control().starts, 0);
+    assert_eq!(broker.control().stops, 0);
+}
+
+#[test]
+fn vpn_action_failure_is_never_reported_as_success() {
+    let docker = RecordingDockerControl::default();
+    let vpn = RecordingVpnControl {
+        fail: true,
+        ..RecordingVpnControl::default()
+    };
+    let mut broker = LinuxPrivilegeBroker::with_controls(docker, vpn);
+
+    assert_eq!(
+        broker.execute(PrivilegedAction::VpnConnect { id: 7 }),
+        Err(PrivilegeBrokerError::ActionFailed)
+    );
+    assert_eq!(broker.vpn_control().connects, vec![7]);
+}
+
+#[test]
+fn production_vpn_actions_remain_fail_closed_until_p3_injects_a_manager() {
+    let mut broker = ProductionPrivilegeBroker::default();
+
+    assert_eq!(
+        broker.execute(PrivilegedAction::VpnConnect { id: 9 }),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert_eq!(
+        broker.execute(PrivilegedAction::VpnDisconnect { id: 9 }),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+}
+
 #[test]
 fn docker_stop_routes_to_one_typed_docker_control_action() {
     let control = RecordingDockerControl {
@@ -46,7 +123,7 @@ fn docker_stop_routes_to_one_typed_docker_control_action() {
 }
 
 #[test]
-fn rootful_docker_start_is_not_approved_by_the_task21_broker() {
+fn rootful_docker_start_is_not_approved_by_the_task22_broker() {
     let control = RecordingDockerControl {
         trusted: true,
         ..RecordingDockerControl::default()

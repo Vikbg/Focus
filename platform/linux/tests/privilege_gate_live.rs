@@ -20,6 +20,8 @@ const PAM_LOGIN_PATH: &str = "/etc/pam.d/sudo-i";
 const DENY_LIST_PATH: &str = "/var/lib/focus/privilege-deny-users";
 const SERVICE_PATH: &str = "/etc/systemd/system/focusd.service";
 const DOCKER_SERVICE_PATH: &str = "/etc/systemd/system/docker.service";
+const DOCKER_SOCKET_PATH: &str = "/etc/systemd/system/docker.socket";
+const DOCKER_SOCKET_FILE: &str = "/run/focus-task22-docker.sock";
 const PAM_RULE: &str = "account requisite pam_listfile.so item=user sense=deny file=/var/lib/focus/privilege-deny-users onerr=fail";
 const NFT_TABLE: &str = "focus_task21_fixture";
 
@@ -174,7 +176,11 @@ fn install_service_fixture() {
     );
     assert!(
         !Path::new(DOCKER_SERVICE_PATH).exists(),
-        "disposable Task 21 VM must not contain a preinstalled docker.service override"
+        "disposable Task 22 VM must not contain a preinstalled docker.service override"
+    );
+    assert!(
+        !Path::new(DOCKER_SOCKET_PATH).exists(),
+        "disposable Task 22 VM must not contain a preinstalled docker.socket override"
     );
     fs::write(
         SERVICE_PATH,
@@ -183,15 +189,27 @@ fn install_service_fixture() {
     .unwrap();
     fs::write(
         DOCKER_SERVICE_PATH,
-        "[Unit]\nDescription=Focus Task 21 typed broker fixture\n[Service]\nType=simple\nExecStart=/bin/sleep infinity\n",
+        "[Unit]\nDescription=Focus Task 22 typed broker fixture\n[Service]\nType=simple\nExecStart=/bin/sleep infinity\n",
+    )
+    .unwrap();
+    fs::write(
+        DOCKER_SOCKET_PATH,
+        format!(
+            "[Unit]\nDescription=Focus Task 22 Docker socket fixture\n[Socket]\nListenStream={DOCKER_SOCKET_FILE}\nService=docker.service\n"
+        ),
     )
     .unwrap();
     assert!(command_status("systemctl", &["daemon-reload"]));
     assert!(command_status("systemctl", &["start", "focusd"]));
+    assert!(command_status("systemctl", &["start", "docker.socket"]));
     assert!(command_status("systemctl", &["start", "docker.service"]));
     assert!(command_status(
         "systemctl",
         &["is-active", "--quiet", "focusd"]
+    ));
+    assert!(command_status(
+        "systemctl",
+        &["is-active", "--quiet", "docker.socket"]
     ));
     assert!(command_status(
         "systemctl",
@@ -252,11 +270,16 @@ impl Drop for VmFixture {
             .args(["delete", "table", "inet", NFT_TABLE])
             .status();
         let _ = Command::new("systemctl")
+            .args(["stop", "docker.socket"])
+            .status();
+        let _ = Command::new("systemctl")
             .args(["stop", "docker.service"])
             .status();
         let _ = Command::new("systemctl").args(["stop", "focusd"]).status();
+        let _ = fs::remove_file(DOCKER_SOCKET_PATH);
         let _ = fs::remove_file(DOCKER_SERVICE_PATH);
         let _ = fs::remove_file(SERVICE_PATH);
+        let _ = fs::remove_file(DOCKER_SOCKET_FILE);
         let _ = Command::new("systemctl").arg("daemon-reload").status();
         let _ = Command::new("userdel").args(["-r", FIXTURE_USER]).status();
         for marker in [
@@ -310,6 +333,10 @@ fn assert_typed_broker_still_succeeds(protected_uid: u32) {
     assert!(!command_status(
         "systemctl",
         &["is-active", "--quiet", "docker.service"]
+    ));
+    assert!(!command_status(
+        "systemctl",
+        &["is-active", "--quiet", "docker.socket"]
     ));
 }
 
