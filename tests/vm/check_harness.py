@@ -10,13 +10,16 @@ TASK11_SCENARIOS = [
     "multi-user",
 ]
 TASK12_SCENARIOS = ["fanotify-permission"]
+TASK21_SCENARIOS = ["privilege-gate"]
 
 host = (ROOT / "tests/vm/run-qemu.sh").read_text(encoding="utf-8")
 guest = (ROOT / "tests/vm/guest-runner.sh").read_text(encoding="utf-8")
 testkit = (ROOT / "crates/focus-testkit/src/lib.rs").read_text(encoding="utf-8")
 fanotify_live = (ROOT / "platform/linux/tests/fanotify_live.rs").read_text(encoding="utf-8")
+privilege_live_path = ROOT / "platform/linux/tests/privilege_gate_live.rs"
+privilege_ci_path = ROOT / ".github/workflows/privilege-gate-live.yml"
 
-for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS:
+for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS + TASK21_SCENARIOS:
     if scenario not in host:
         raise SystemExit(f"host VM runner is missing scenario {scenario}")
     if scenario not in guest:
@@ -52,6 +55,7 @@ required_guest_markers = [
     "FOCUS_ALLOWED_UID=0",
     "FOCUS_CLI_PATH=",
     "--test fanotify_live",
+    "--test privilege_gate_live",
     "--ignored",
     "--nocapture",
 ]
@@ -67,8 +71,37 @@ for fixture in required_fanotify_fixtures:
     if fixture not in fanotify_live:
         raise SystemExit(f"fanotify live tests are missing fixture {fixture}")
 
+if not privilege_live_path.is_file():
+    raise SystemExit("privilege gate live test file is missing")
+privilege_live = privilege_live_path.read_text(encoding="utf-8")
+required_privilege_fixtures = [
+    "privilege_gate_blocks_unrestricted_sudo_paths",
+]
+for fixture in required_privilege_fixtures:
+    if fixture not in privilege_live:
+        raise SystemExit(f"privilege live tests are missing fixture {fixture}")
+
+if not privilege_ci_path.is_file():
+    raise SystemExit("privilege gate live CI workflow is missing")
+privilege_ci = privilege_ci_path.read_text(encoding="utf-8")
+required_privilege_ci_markers = [
+    "name: Privilege gate live",
+    "runs-on: ubuntu-24.04",
+    "systemd-detect-virt --vm",
+    "FOCUS_VM_SCENARIO=privilege-gate",
+    "--test privilege_gate_live",
+    "--ignored",
+    "--nocapture",
+]
+for marker in required_privilege_ci_markers:
+    if marker not in privilege_ci:
+        raise SystemExit(f"privilege gate live CI workflow is missing {marker}")
+
 if "--exact" in guest:
     raise SystemExit("fanotify VM scenario must execute all ignored fanotify_live fixtures")
+
+if "privilege gate live fixture is not implemented" in guest:
+    raise SystemExit("privilege VM scenario must execute the live privilege gate")
 
 if "FOCUS_CLI_EXECUTABLE" in guest:
     raise SystemExit("guest VM runner uses obsolete focusd CLI path configuration")

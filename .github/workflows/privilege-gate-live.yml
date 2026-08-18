@@ -1,0 +1,65 @@
+name: Privilege gate live
+
+on:
+  push:
+    branches:
+      - "main"
+      - "agent/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/focus-core/**"
+      - "crates/focus-platform/**"
+      - "platform/linux/**"
+      - "tests/vm/**"
+      - ".github/workflows/privilege-gate-live.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/focus-core/**"
+      - "crates/focus-platform/**"
+      - "platform/linux/**"
+      - "tests/vm/**"
+      - ".github/workflows/privilege-gate-live.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  task21-privilege-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify disposable VM runner
+        run: systemd-detect-virt --vm
+
+      - name: Install privilege fixture dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes nftables
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run Task 21 privilege gate
+        run: |
+          sudo env \
+            "PATH=$PATH" \
+            "RUSTUP_HOME=$HOME/.rustup" \
+            "CARGO_HOME=$HOME/.cargo" \
+            FOCUS_VM_SCENARIO=privilege-gate \
+            cargo test \
+              --locked \
+              -p focus-linux \
+              --test privilege_gate_live \
+              -- \
+              --ignored \
+              --nocapture

@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use focus_core::ExecutionOrigin;
+use focus_core::{ExecutionOrigin, PrivilegeTransition};
 use focus_linux::{observe_executable, observe_open_executable};
 
 static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
@@ -51,6 +51,21 @@ fn opened_executable_identity_survives_path_replacement_without_toctou() {
         replacement.filesystem_identity()
     );
     assert_ne!(observed.digest(), replacement.digest());
+
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn opened_setid_executable_is_marked_as_privilege_transition() {
+    let dir = fixture_dir();
+    let path = dir.join("setid-helper");
+    write_executable(&path, b"#!/bin/sh\nexit 0\n");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o4755)).unwrap();
+    let opened = File::open(&path).unwrap();
+
+    let observed = observe_open_executable(opened.as_fd(), ExecutionOrigin::Direct).unwrap();
+
+    assert_eq!(observed.privilege_transition(), PrivilegeTransition::SetId);
 
     fs::remove_dir_all(dir).unwrap();
 }

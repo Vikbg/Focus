@@ -1,5 +1,6 @@
 use focus_testkit::{
-    LinuxVmFixture, LinuxVmScenario, PROCESS_ENFORCEMENT_VM_FIXTURES, REQUIRED_LINUX_VM_FIXTURES,
+    LinuxVmFixture, LinuxVmScenario, PRIVILEGE_ENFORCEMENT_VM_FIXTURES,
+    PROCESS_ENFORCEMENT_VM_FIXTURES, REQUIRED_LINUX_VM_FIXTURES,
 };
 
 #[test]
@@ -44,4 +45,16 @@ fn task12_process_enforcement_requires_real_fanotify_permission_fixture() {
     assert!(!fanotify.requires_reboot());
     assert!(!fanotify.requires_suspend_resume());
     assert_eq!(fanotify.active_users(), 1);
+}
+
+#[test]
+fn task21_privilege_gate_requires_real_disposable_vm_fixture() {
+    assert_eq!(PRIVILEGE_ENFORCEMENT_VM_FIXTURES.len(), 1);
+    let privilege = PRIVILEGE_ENFORCEMENT_VM_FIXTURES[0];
+
+    assert_eq!(privilege.scenario(), LinuxVmScenario::PrivilegeGate);
+    assert_eq!(privilege.slug(), "privilege-gate");
+    assert!(!privilege.requires_reboot());
+    assert!(!privilege.requires_suspend_resume());
+    assert_eq!(privilege.active_users(), 1);
 }

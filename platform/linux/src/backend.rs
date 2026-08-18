@@ -1,30 +1,51 @@
 use focus_core::ProcessEnforcementPlan;
-use focus_platform::{GuardKind, PlatformBackend, PlatformError, PlatformFuture};
+use focus_platform::{GuardKind, PlatformBackend, PlatformError, PlatformFuture, PrivilegedAction};
 
 use crate::{
-    ExecutionContextClassifier, FailClosedProcessGuard, HostSystemProbe, LinuxProcessControl,
-    ProcessControl, ProcessGuardControl, ProcfsExecutionFactSource, ProductionProcessGuard,
-    RustixPidfdOps, SystemProbe, close_blocked_processes, evaluate_preflight,
-    require_strict_preflight,
+    ExecutionContextClassifier, FailClosedPrivilegeBroker, FailClosedPrivilegeGuard,
+    FailClosedProcessGuard, HostSystemProbe, LinuxProcessControl, PrivilegeBrokerControl,
+    PrivilegeGuardControl, ProcessControl, ProcessGuardControl, ProcfsExecutionFactSource,
+    ProductionPrivilegeBroker, ProductionPrivilegeGuard, ProductionProcessGuard, RustixPidfdOps,
+    SystemProbe, close_blocked_processes, evaluate_preflight, require_strict_preflight,
 };
 
 /// Production process-control stack used by the Linux backend.
 pub type ProductionProcessControl = LinuxProcessControl<ProcfsExecutionFactSource, RustixPidfdOps>;
 
-/// Linux platform backend that owns strict preflight, process closure, and a typed continuous
-/// process-execution guard controller.
+/// Linux platform backend that owns strict preflight, process closure, and typed enforcement guards.
 #[derive(Debug)]
 pub struct LinuxBackend<
     P = HostSystemProbe,
     C = ProductionProcessControl,
     G = ProductionProcessGuard,
+    V = FailClosedPrivilegeGuard,
+    B = FailClosedPrivilegeBroker,
 > {
     probe: P,
     process_control: C,
     process_guard: G,
+    privilege_guard: V,
+    privilege_broker: B,
 }
 
-impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGuard> {
+/// Fully wired production Linux backend for one explicitly protected UID.
+pub type ProductionLinuxBackend = LinuxBackend<
+    HostSystemProbe,
+    ProductionProcessControl,
+    ProductionProcessGuard,
+    ProductionPrivilegeGuard,
+    ProductionPrivilegeBroker,
+>;
+
+impl Default
+    for LinuxBackend<
+        HostSystemProbe,
+        ProductionProcessControl,
+        ProductionProcessGuard,
+        FailClosedPrivilegeGuard,
+        FailClosedPrivilegeBroker,
+    >
+{
     fn default() -> Self {
         Self {
             probe: HostSystemProbe,
@@ -34,11 +55,13 @@ impl Default for LinuxBackend<HostSystemProbe, ProductionProcessControl, Product
                 ExecutionContextClassifier::new(Vec::new()),
             ),
             process_guard: ProductionProcessGuard::default(),
+            privilege_guard: FailClosedPrivilegeGuard,
+            privilege_broker: FailClosedPrivilegeBroker,
         }
     }
 }
 
-impl LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGuard> {
+impl ProductionLinuxBackend {
     /// Creates the production backend scoped to one protected effective UID.
     #[must_use]
     pub fn for_uid(enforced_uid: u32) -> Self {
@@ -51,14 +74,24 @@ impl LinuxBackend<HostSystemProbe, ProductionProcessControl, ProductionProcessGu
                 enforced_uid,
             ),
             process_guard: ProductionProcessGuard::for_uid(enforced_uid),
+            privilege_guard: ProductionPrivilegeGuard::for_uid(enforced_uid),
+            privilege_broker: ProductionPrivilegeBroker::default(),
         }
     }
 }
 
-impl<P> LinuxBackend<P, ProductionProcessControl, FailClosedProcessGuard> {
+impl<P>
+    LinuxBackend<
+        P,
+        ProductionProcessControl,
+        FailClosedProcessGuard,
+        FailClosedPrivilegeGuard,
+        FailClosedPrivilegeBroker,
+    >
+{
     /// Creates a Linux backend with an explicit read-only system probe and production process
-    /// control. Continuous process execution prevention remains fail-closed until an explicit
-    /// process guard controller is supplied.
+    /// control. Process and privilege enforcement remain fail-closed until explicit controllers are
+    /// supplied.
     #[must_use]
     pub fn with_probe(probe: P) -> Self {
         Self {
@@ -69,26 +102,32 @@ impl<P> LinuxBackend<P, ProductionProcessControl, FailClosedProcessGuard> {
                 ExecutionContextClassifier::new(Vec::new()),
             ),
             process_guard: FailClosedProcessGuard,
+            privilege_guard: FailClosedPrivilegeGuard,
+            privilege_broker: FailClosedPrivilegeBroker,
         }
     }
 }
 
-impl<P, C> LinuxBackend<P, C, FailClosedProcessGuard> {
+impl<P, C>
+    LinuxBackend<P, C, FailClosedProcessGuard, FailClosedPrivilegeGuard, FailClosedPrivilegeBroker>
+{
     /// Creates a Linux backend with explicit read-only system and process-control dependencies.
-    /// Continuous process execution prevention remains fail-closed.
+    /// Process and privilege enforcement remain fail-closed.
     #[must_use]
     pub const fn with_probe_and_process_control(probe: P, process_control: C) -> Self {
         Self {
             probe,
             process_control,
             process_guard: FailClosedProcessGuard,
+            privilege_guard: FailClosedPrivilegeGuard,
+            privilege_broker: FailClosedPrivilegeBroker,
         }
     }
 }
 
-impl<P, C, G> LinuxBackend<P, C, G> {
+impl<P, C, G> LinuxBackend<P, C, G, FailClosedPrivilegeGuard, FailClosedPrivilegeBroker> {
     /// Creates a Linux backend with explicit system, process-control, and process-guard
-    /// dependencies.
+    /// dependencies. Privilege enforcement remains fail-closed.
     #[must_use]
     pub const fn with_probe_process_control_and_guard(
         probe: P,
@@ -99,6 +138,48 @@ impl<P, C, G> LinuxBackend<P, C, G> {
             probe,
             process_control,
             process_guard,
+            privilege_guard: FailClosedPrivilegeGuard,
+            privilege_broker: FailClosedPrivilegeBroker,
+        }
+    }
+}
+
+impl<P, C, G, V> LinuxBackend<P, C, G, V, FailClosedPrivilegeBroker> {
+    /// Creates a Linux backend with explicit system, process-control, process-guard, and privilege
+    /// guard dependencies. Typed privileged actions remain fail-closed.
+    #[must_use]
+    pub const fn with_controls(
+        probe: P,
+        process_control: C,
+        process_guard: G,
+        privilege_guard: V,
+    ) -> Self {
+        Self {
+            probe,
+            process_control,
+            process_guard,
+            privilege_guard,
+            privilege_broker: FailClosedPrivilegeBroker,
+        }
+    }
+}
+
+impl<P, C, G, V, B> LinuxBackend<P, C, G, V, B> {
+    /// Creates a Linux backend with every typed enforcement dependency supplied explicitly.
+    #[must_use]
+    pub const fn with_controls_and_broker(
+        probe: P,
+        process_control: C,
+        process_guard: G,
+        privilege_guard: V,
+        privilege_broker: B,
+    ) -> Self {
+        Self {
+            probe,
+            process_control,
+            process_guard,
+            privilege_guard,
+            privilege_broker,
         }
     }
 
@@ -119,13 +200,33 @@ impl<P, C, G> LinuxBackend<P, C, G> {
     pub const fn process_guard_mut(&mut self) -> &mut G {
         &mut self.process_guard
     }
+
+    /// Returns the privilege-guard dependency for diagnostics and deterministic tests.
+    #[must_use]
+    pub const fn privilege_guard(&self) -> &V {
+        &self.privilege_guard
+    }
+
+    /// Returns mutable access to the privilege-guard dependency for deterministic health tests.
+    #[must_use]
+    pub const fn privilege_guard_mut(&mut self) -> &mut V {
+        &mut self.privilege_guard
+    }
+
+    /// Returns the typed privilege-broker dependency for diagnostics and deterministic tests.
+    #[must_use]
+    pub const fn privilege_broker(&self) -> &B {
+        &self.privilege_broker
+    }
 }
 
-impl<P, C, G> PlatformBackend for LinuxBackend<P, C, G>
+impl<P, C, G, V, B> PlatformBackend for LinuxBackend<P, C, G, V, B>
 where
     P: SystemProbe,
     C: ProcessControl,
     G: ProcessGuardControl,
+    V: PrivilegeGuardControl,
+    B: PrivilegeBrokerControl,
 {
     fn preflight(&mut self) -> PlatformFuture<'_, ()> {
         let result = evaluate_preflight(&self.probe)
@@ -164,17 +265,47 @@ where
     }
 
     fn arm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
-        Box::pin(async move { Err(PlatformError::GuardFailed(guard)) })
+        let result = if guard == GuardKind::Privilege {
+            self.privilege_guard
+                .arm()
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Privilege))
+        } else {
+            Err(PlatformError::GuardFailed(guard))
+        };
+        Box::pin(async move { result })
     }
 
-    fn disarm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
-        let result = if guard == GuardKind::Process {
-            self.process_guard
-                .disarm()
-                .map_err(|_| PlatformError::GuardFailed(GuardKind::Process))
+    fn verify_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        let result = if guard == GuardKind::Privilege {
+            self.privilege_guard
+                .verify()
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Privilege))
         } else {
             Ok(())
         };
+        Box::pin(async move { result })
+    }
+
+    fn disarm_guard(&mut self, guard: GuardKind) -> PlatformFuture<'_, ()> {
+        let result = match guard {
+            GuardKind::Process => self
+                .process_guard
+                .disarm()
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Process)),
+            GuardKind::Privilege => self
+                .privilege_guard
+                .disarm()
+                .map_err(|_| PlatformError::GuardFailed(GuardKind::Privilege)),
+            GuardKind::Network | GuardKind::Browser => Ok(()),
+        };
+        Box::pin(async move { result })
+    }
+
+    fn execute_privileged_action(&mut self, action: PrivilegedAction) -> PlatformFuture<'_, ()> {
+        let result = self
+            .privilege_broker
+            .execute(action)
+            .map_err(|_| PlatformError::PrivilegedActionFailed(action));
         Box::pin(async move { result })
     }
 }

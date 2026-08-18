@@ -5,16 +5,21 @@ mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
 mod execution_permission;
+mod fail_closed_privilege_guard;
 mod fanotify_execution_channel;
 mod linux_process_control;
 mod nix_fanotify;
 mod preflight;
+mod privilege_guard;
+mod privilege_session;
+mod privileged_broker;
 mod process_closer;
 mod process_guard;
+mod production_privilege_guard;
 mod rustix_pidfd;
 mod systemd;
 
-pub use backend::LinuxBackend;
+pub use backend::{LinuxBackend, ProductionLinuxBackend};
 pub use executable_identity::{
     ExecutableIdentityError, observe_executable, observe_open_executable,
 };
@@ -30,6 +35,7 @@ pub use execution_permission::{
     ExecutionAttempt, ExecutionPermission, ExecutionPermissionChannel, ExecutionPermissionStep,
     decide_execution_permission, process_next_execution_permission,
 };
+pub use fail_closed_privilege_guard::FailClosedPrivilegeGuard;
 pub use fanotify_execution_channel::{
     FanotifyChannelHealth, FanotifyExecutionChannel, FanotifyExecutionEvent,
     FanotifyPermissionSource,
@@ -42,6 +48,11 @@ pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
 };
+pub use privilege_guard::{PrivilegeGuardControl, PrivilegeGuardError};
+pub use privileged_broker::{
+    DockerServiceControl, FailClosedPrivilegeBroker, LinuxPrivilegeBroker, PrivilegeBrokerControl,
+    PrivilegeBrokerError, ProductionPrivilegeBroker, SystemctlDockerServiceControl,
+};
 pub use process_closer::{
     ProcessCloseError, ProcessCloseReport, ProcessControl, ProcessLifetime, RunningProcess,
     close_blocked_processes,
@@ -50,6 +61,7 @@ pub use process_guard::{
     FailClosedProcessGuard, ProcessGuardControl, ProcessGuardError, ProcessGuardMetrics,
     ProductionProcessGuard,
 };
+pub use production_privilege_guard::ProductionPrivilegeGuard;
 pub use rustix_pidfd::RustixPidfdOps;
 
 use std::{
