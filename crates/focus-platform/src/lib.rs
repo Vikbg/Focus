@@ -63,7 +63,7 @@ pub trait PlatformBackend {
         Box::pin(async { Ok(()) })
     }
 
-    /// Arms the process guard against a frozen enforcement plan.
+    /// Arms the process guard against the exact frozen process plan.
     ///
     /// The default is fail-closed. Implementations must opt in explicitly and must be idempotent
     /// because crash recovery can reapply the same plan after the platform side effect completed
