@@ -45,7 +45,8 @@ pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
 };
 pub use nftables_guard::{
-    FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE, FocusNftablesCommand, FocusNftablesTransaction,
+    FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE, FocusNftablesCommand, FocusNftablesControl,
+    FocusNftablesError, FocusNftablesTransaction, reload_focus_nftables,
 };
 pub use nix_fanotify::NixFanotifyPermissionSource;
 pub use preflight::{
