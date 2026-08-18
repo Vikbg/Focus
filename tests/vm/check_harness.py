@@ -67,6 +67,17 @@ for marker in required_guest_markers:
     if marker not in guest:
         raise SystemExit(f"guest VM runner is missing {marker}")
 
+required_reboot_markers = [
+    "FOCUS_KEEP_SYSTEMD_INSTALL=1",
+    "wait_for_focusd_service_after_reboot",
+    "systemctl is-enabled --quiet focusd.service",
+    "systemctl is-active --quiet focusd.service",
+    "FOCUS_SOCKET_PATH=/run/focus/focusd.sock /usr/bin/focusctl status",
+]
+for marker in required_reboot_markers:
+    if marker not in guest:
+        raise SystemExit(f"reboot fixture is missing {marker}")
+
 if not service_live_path.is_file():
     raise SystemExit("systemd service live fixture is missing")
 service_live = service_live_path.read_text(encoding="utf-8")
