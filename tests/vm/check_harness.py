@@ -17,6 +17,7 @@ guest = (ROOT / "tests/vm/guest-runner.sh").read_text(encoding="utf-8")
 testkit = (ROOT / "crates/focus-testkit/src/lib.rs").read_text(encoding="utf-8")
 fanotify_live = (ROOT / "platform/linux/tests/fanotify_live.rs").read_text(encoding="utf-8")
 privilege_live_path = ROOT / "platform/linux/tests/privilege_gate_live.rs"
+privilege_ci_path = ROOT / ".github/workflows/privilege-gate-live.yml"
 
 for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS + TASK21_SCENARIOS:
     if scenario not in host:
@@ -79,6 +80,22 @@ required_privilege_fixtures = [
 for fixture in required_privilege_fixtures:
     if fixture not in privilege_live:
         raise SystemExit(f"privilege live tests are missing fixture {fixture}")
+
+if not privilege_ci_path.is_file():
+    raise SystemExit("privilege gate live CI workflow is missing")
+privilege_ci = privilege_ci_path.read_text(encoding="utf-8")
+required_privilege_ci_markers = [
+    "name: Privilege gate live",
+    "runs-on: ubuntu-24.04",
+    "systemd-detect-virt --vm",
+    "FOCUS_VM_SCENARIO=privilege-gate",
+    "--test privilege_gate_live",
+    "--ignored",
+    "--nocapture",
+]
+for marker in required_privilege_ci_markers:
+    if marker not in privilege_ci:
+        raise SystemExit(f"privilege gate live CI workflow is missing {marker}")
 
 if "--exact" in guest:
     raise SystemExit("fanotify VM scenario must execute all ignored fanotify_live fixtures")
