@@ -15,6 +15,7 @@ mod privilege_session;
 mod privileged_broker;
 mod process_closer;
 mod process_guard;
+mod production_privilege_guard;
 mod rustix_pidfd;
 mod systemd;
 
@@ -47,7 +48,7 @@ pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
 };
-pub use privilege_guard::{PrivilegeGuardControl, PrivilegeGuardError, ProductionPrivilegeGuard};
+pub use privilege_guard::{PrivilegeGuardControl, PrivilegeGuardError};
 pub use privileged_broker::{
     DockerServiceControl, FailClosedPrivilegeBroker, LinuxPrivilegeBroker, PrivilegeBrokerControl,
     PrivilegeBrokerError, ProductionPrivilegeBroker, SystemctlDockerServiceControl,
@@ -60,6 +61,7 @@ pub use process_guard::{
     FailClosedProcessGuard, ProcessGuardControl, ProcessGuardError, ProcessGuardMetrics,
     ProductionProcessGuard,
 };
+pub use production_privilege_guard::ProductionPrivilegeGuard;
 pub use rustix_pidfd::RustixPidfdOps;
 
 use std::{
