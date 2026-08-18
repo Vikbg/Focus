@@ -495,9 +495,7 @@ mod tests {
         let fixture = Fixture::new();
         fs::write(
             &fixture.pam_config,
-            format!(
-                "#%PAM-1.0\naccount sufficient pam_permit.so\n{REQUIRED_PAM_ACCOUNT_RULE}\n"
-            ),
+            format!("#%PAM-1.0\naccount sufficient pam_permit.so\n{REQUIRED_PAM_ACCOUNT_RULE}\n"),
         )
         .unwrap();
 
