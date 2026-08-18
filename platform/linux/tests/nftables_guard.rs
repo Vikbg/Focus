@@ -1,4 +1,4 @@
-use focus_linux::{FocusNftablesTransaction, FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE};
+use focus_linux::{FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE, FocusNftablesTransaction};
 
 #[test]
 fn focus_transaction_is_namespaced_and_never_flushes_the_global_ruleset() {
