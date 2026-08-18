@@ -18,6 +18,10 @@ testkit = (ROOT / "crates/focus-testkit/src/lib.rs").read_text(encoding="utf-8")
 fanotify_live = (ROOT / "platform/linux/tests/fanotify_live.rs").read_text(encoding="utf-8")
 privilege_live_path = ROOT / "platform/linux/tests/privilege_gate_live.rs"
 privilege_ci_path = ROOT / ".github/workflows/privilege-gate-live.yml"
+service_path = ROOT / "platform/linux/systemd/focusd.service"
+service_live_path = ROOT / "tests/vm/systemd-service-live.sh"
+service_ci_path = ROOT / ".github/workflows/systemd-service-live.yml"
+reboot_ci_path = ROOT / ".github/workflows/systemd-reboot-live.yml"
 
 for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS + TASK21_SCENARIOS:
     if scenario not in host:
@@ -37,6 +41,8 @@ required_host_markers = [
     'qemu_pid=""',
     'kill "$qemu_pid"',
     'wait "$qemu_pid"',
+    "packages:",
+    "nftables",
 ]
 for marker in required_host_markers:
     if marker not in host:
@@ -58,10 +64,50 @@ required_guest_markers = [
     "--test privilege_gate_live",
     "--ignored",
     "--nocapture",
+    "tests/vm/systemd-service-live.sh",
 ]
 for marker in required_guest_markers:
     if marker not in guest:
         raise SystemExit(f"guest VM runner is missing {marker}")
+
+required_reboot_markers = [
+    "FOCUS_KEEP_SYSTEMD_INSTALL=1",
+    "wait_for_focusd_service_after_reboot",
+    "systemctl is-enabled --quiet focusd.service",
+    "systemctl is-active --quiet focusd.service",
+    "FOCUS_SOCKET_PATH=/run/focus/focusd.sock /usr/bin/focusctl status",
+]
+for marker in required_reboot_markers:
+    if marker not in guest:
+        raise SystemExit(f"reboot fixture is missing {marker}")
+
+if not service_live_path.is_file():
+    raise SystemExit("systemd service live fixture is missing")
+service_live = service_live_path.read_text(encoding="utf-8")
+required_service_live_markers = [
+    "systemd-detect-virt --vm",
+    "/usr/libexec/focus/focusd",
+    "/usr/bin/focusctl",
+    "/etc/systemd/system/focusd.service",
+    "/etc/focus/focusd.env",
+    "install -D -o root -g root -m 0755",
+    "install -D -o root -g root -m 0644",
+    "install -D -o root -g root -m 0600",
+    "systemctl daemon-reload",
+    "systemctl enable --now focusd.service",
+    "systemctl is-enabled --quiet focusd.service",
+    "systemctl show --property MainPID --value focusd.service",
+    'kill -KILL "$old_pid"',
+    "stat -c '%u:%g %a' /etc/systemd/system/focusd.service",
+    "stat -c '%u:%g %a' /etc/focus/focusd.env",
+    "stat -c '%u:%g %a' /run/focus",
+    "stat -c '%u:%g %a' /var/lib/focus",
+    "$repo_root/.focus-vm-bin/focusd",
+    "$repo_root/.focus-vm-bin/focusctl",
+]
+for marker in required_service_live_markers:
+    if marker not in service_live:
+        raise SystemExit(f"systemd service live fixture is missing {marker}")
 
 required_fanotify_fixtures = [
     "fanotify_open_exec_permission_blocks_and_allows_real_exec",
@@ -96,6 +142,57 @@ required_privilege_ci_markers = [
 for marker in required_privilege_ci_markers:
     if marker not in privilege_ci:
         raise SystemExit(f"privilege gate live CI workflow is missing {marker}")
+
+if not service_ci_path.is_file():
+    raise SystemExit("systemd service live CI workflow is missing")
+service_ci = service_ci_path.read_text(encoding="utf-8")
+required_service_ci_markers = [
+    "name: Systemd service live",
+    "runs-on: ubuntu-24.04",
+    "systemd-detect-virt --vm",
+    "tests/vm/systemd-service-live.sh",
+]
+for marker in required_service_ci_markers:
+    if marker not in service_ci:
+        raise SystemExit(f"systemd service live CI workflow is missing {marker}")
+
+if not reboot_ci_path.is_file():
+    raise SystemExit("systemd reboot live CI workflow is missing")
+reboot_ci = reboot_ci_path.read_text(encoding="utf-8")
+required_reboot_ci_markers = [
+    "name: Systemd reboot live",
+    "runs-on: ubuntu-24.04",
+    "qemu-system-x86",
+    "cloud-image-utils",
+    "ubuntu-24.04-server-cloudimg-amd64.img",
+    "6e40c07ae715f744f84af0bec76415cc1987dd115b4b8de437818561f01a3733",
+    ".focus-vm-bin",
+    "FOCUS_VM_BASE_IMAGE=",
+    "tests/vm/run-qemu.sh reboot",
+]
+for marker in required_reboot_ci_markers:
+    if marker not in reboot_ci:
+        raise SystemExit(f"systemd reboot live CI workflow is missing {marker}")
+
+if not service_path.is_file():
+    raise SystemExit("focusd systemd service definition is missing")
+service = service_path.read_text(encoding="utf-8")
+required_service_markers = [
+    "User=root",
+    "Group=root",
+    "ExecStart=/usr/libexec/focus/focusd",
+    "EnvironmentFile=/etc/focus/focusd.env",
+    "Restart=on-failure",
+    "RuntimeDirectory=focus",
+    "RuntimeDirectoryMode=0750",
+    "StateDirectory=focus",
+    "StateDirectoryMode=0700",
+    "UMask=0077",
+    "WantedBy=multi-user.target",
+]
+for marker in required_service_markers:
+    if marker not in service:
+        raise SystemExit(f"focusd systemd service is missing {marker}")
 
 if "--exact" in guest:
     raise SystemExit("fanotify VM scenario must execute all ignored fanotify_live fixtures")

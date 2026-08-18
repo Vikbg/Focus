@@ -51,6 +51,9 @@ EOF
 
 cat >"$workdir/user-data" <<EOF
 #cloud-config
+package_update: true
+packages:
+  - nftables
 write_files:
   - path: /etc/focus-vm-scenario
     owner: root:root

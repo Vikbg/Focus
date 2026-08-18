@@ -1,0 +1,54 @@
+name: Systemd service live
+
+on:
+  push:
+    branches:
+      - "main"
+      - "agent/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "bins/**"
+      - "crates/**"
+      - "platform/linux/**"
+      - "tests/vm/**"
+      - ".github/workflows/systemd-service-live.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "bins/**"
+      - "crates/**"
+      - "platform/linux/**"
+      - "tests/vm/**"
+      - ".github/workflows/systemd-service-live.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  task23-systemd-service:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify disposable VM runner
+        run: systemd-detect-virt --vm
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run Task 23 systemd service fixture
+        run: |
+          sudo env \
+            "PATH=$PATH" \
+            "RUSTUP_HOME=$HOME/.rustup" \
+            "CARGO_HOME=$HOME/.cargo" \
+            "FOCUS_REPO_ROOT=$GITHUB_WORKSPACE" \
+            bash "$GITHUB_WORKSPACE/tests/vm/systemd-service-live.sh"

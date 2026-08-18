@@ -1,0 +1,70 @@
+name: Systemd reboot live
+
+on:
+  push:
+    branches:
+      - "main"
+      - "agent/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "bins/**"
+      - "crates/**"
+      - "platform/linux/**"
+      - "tests/vm/**"
+      - ".github/workflows/systemd-reboot-live.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "bins/**"
+      - "crates/**"
+      - "platform/linux/**"
+      - "tests/vm/**"
+      - ".github/workflows/systemd-reboot-live.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  task23-reboot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build Focus guest binaries
+        run: |
+          target="$RUNNER_TEMP/focus-qemu-target"
+          CARGO_TARGET_DIR="$target" cargo build --locked -p focusd -p focusctl
+          install -D -m 0755 "$target/debug/focusd" .focus-vm-bin/focusd
+          install -D -m 0755 "$target/debug/focusctl" .focus-vm-bin/focusctl
+
+      - name: Install QEMU and cloud image tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86 qemu-utils cloud-image-utils
+
+      - name: Download pinned Ubuntu 24.04 cloud image
+        run: |
+          image="$RUNNER_TEMP/ubuntu-24.04-server-cloudimg-amd64.img"
+          curl --fail --location --retry 3 \
+            --output "$image" \
+            "https://cloud-images.ubuntu.com/releases/noble/release-20260814/ubuntu-24.04-server-cloudimg-amd64.img"
+          printf '%s  %s\n' \
+            '6e40c07ae715f744f84af0bec76415cc1987dd115b4b8de437818561f01a3733' \
+            "$image" \
+            | sha256sum --check --strict
+
+      - name: Run Task 23 reboot fixture
+        run: |
+          image="$RUNNER_TEMP/ubuntu-24.04-server-cloudimg-amd64.img"
+          FOCUS_VM_BASE_IMAGE="$image" bash tests/vm/run-qemu.sh reboot
