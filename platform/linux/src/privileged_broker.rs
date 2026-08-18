@@ -69,44 +69,98 @@ pub trait DockerServiceControl {
     fn stop_docker(&mut self) -> Result<(), PrivilegeBrokerError>;
 }
 
-/// Linux broker that maps closed privileged actions to narrow service controls.
-#[derive(Debug)]
-pub struct LinuxPrivilegeBroker<C> {
-    control: C,
+/// Narrow provider-neutral VPN dependency used by the typed broker.
+pub trait VpnActionControl {
+    /// Connects one exact VPN identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the identity is not approved or the provider action fails.
+    fn connect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError>;
+
+    /// Disconnects one exact VPN identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the identity is not approved or the provider action fails.
+    fn disconnect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError>;
 }
 
-impl<C> LinuxPrivilegeBroker<C> {
-    /// Creates a broker from one narrow Docker service-control dependency.
+/// VPN control used until a provider-neutral manager is injected by the later VPN phase.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct FailClosedVpnActionControl;
+
+impl VpnActionControl for FailClosedVpnActionControl {
+    fn connect_vpn(&mut self, _id: u128) -> Result<(), PrivilegeBrokerError> {
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    }
+
+    fn disconnect_vpn(&mut self, _id: u128) -> Result<(), PrivilegeBrokerError> {
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    }
+}
+
+/// Linux broker that maps closed privileged actions to narrow typed controls.
+#[derive(Debug)]
+pub struct LinuxPrivilegeBroker<D, V = FailClosedVpnActionControl> {
+    control: D,
+    vpn_control: V,
+}
+
+impl<D> LinuxPrivilegeBroker<D, FailClosedVpnActionControl> {
+    /// Creates a broker with Docker control and fail-closed VPN actions.
     #[must_use]
-    pub const fn new(control: C) -> Self {
-        Self { control }
+    pub const fn new(control: D) -> Self {
+        Self {
+            control,
+            vpn_control: FailClosedVpnActionControl,
+        }
+    }
+}
+
+impl<D, V> LinuxPrivilegeBroker<D, V> {
+    /// Creates a broker from explicit narrow Docker and VPN controls.
+    #[must_use]
+    pub const fn with_controls(control: D, vpn_control: V) -> Self {
+        Self {
+            control,
+            vpn_control,
+        }
     }
 
     /// Returns the Docker control for deterministic tests and diagnostics.
     #[must_use]
-    pub const fn control(&self) -> &C {
+    pub const fn control(&self) -> &D {
         &self.control
     }
-}
 
-impl<C: Default> Default for LinuxPrivilegeBroker<C> {
-    fn default() -> Self {
-        Self::new(C::default())
+    /// Returns the VPN control for deterministic tests and diagnostics.
+    #[must_use]
+    pub const fn vpn_control(&self) -> &V {
+        &self.vpn_control
     }
 }
 
-impl<C: DockerServiceControl> PrivilegeBrokerControl for LinuxPrivilegeBroker<C> {
+impl<D: Default, V: Default> Default for LinuxPrivilegeBroker<D, V> {
+    fn default() -> Self {
+        Self::with_controls(D::default(), V::default())
+    }
+}
+
+impl<D: DockerServiceControl, V: VpnActionControl> PrivilegeBrokerControl
+    for LinuxPrivilegeBroker<D, V>
+{
     fn execute(&mut self, action: PrivilegedAction) -> Result<(), PrivilegeBrokerError> {
         match action {
+            PrivilegedAction::VpnConnect { id } => self.vpn_control.connect_vpn(id),
+            PrivilegedAction::VpnDisconnect { id } => self.vpn_control.disconnect_vpn(id),
             PrivilegedAction::DockerStop => {
                 if !self.control.executor_is_trusted()? {
                     return Err(PrivilegeBrokerError::UnsafeExecutor);
                 }
                 self.control.stop_docker()
             }
-            PrivilegedAction::VpnConnect { .. }
-            | PrivilegedAction::VpnDisconnect { .. }
-            | PrivilegedAction::DockerStart => Err(PrivilegeBrokerError::ActionNotApproved),
+            PrivilegedAction::DockerStart => Err(PrivilegeBrokerError::ActionNotApproved),
         }
     }
 }
@@ -183,7 +237,8 @@ impl DockerServiceControl for SystemctlDockerServiceControl {
 }
 
 /// Production typed privilege broker.
-pub type ProductionPrivilegeBroker = LinuxPrivilegeBroker<SystemctlDockerServiceControl>;
+pub type ProductionPrivilegeBroker =
+    LinuxPrivilegeBroker<SystemctlDockerServiceControl, FailClosedVpnActionControl>;
 
 #[cfg(test)]
 mod tests {
