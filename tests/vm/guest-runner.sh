@@ -50,6 +50,19 @@ finish_success() {
   systemctl poweroff
 }
 
+wait_for_focusd_service_after_reboot() {
+  for _ in $(seq 1 200); do
+    if systemctl is-enabled --quiet focusd.service \
+      && systemctl is-active --quiet focusd.service \
+      && [[ -S /run/focus/focusd.sock ]]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "focusd.service did not start automatically after reboot" >&2
+  return 1
+}
+
 run_daemon_restart_fixture() {
   command -v cargo >/dev/null 2>&1
   FOCUS_REPO_ROOT=/mnt/focus \
@@ -128,6 +141,12 @@ case "$scenario" in
   reboot)
     marker="$state_dir/reboot-boot-id"
     if [[ ! -f "$marker" ]]; then
+      FOCUS_REPO_ROOT=/mnt/focus \
+      FOCUS_ALLOWED_UID=0 \
+      FOCUS_CLI_PATH=/usr/bin/focusctl \
+      FOCUS_KEEP_SYSTEMD_INSTALL=1 \
+        bash /mnt/focus/tests/vm/systemd-service-live.sh
+      systemctl is-enabled --quiet focusd.service
       printf '%s\n' "$boot_id" >"$marker"
       sync
       systemctl reboot
@@ -138,6 +157,11 @@ case "$scenario" in
       echo "reboot fixture retained the same boot id" >&2
       exit 1
     fi
+    wait_for_focusd_service_after_reboot
+    systemctl is-enabled --quiet focusd.service
+    systemctl is-active --quiet focusd.service
+    FOCUS_SOCKET_PATH=/run/focus/focusd.sock /usr/bin/focusctl status \
+      | grep -F "Focus daemon: running"
     finish_success
     ;;
   suspend-resume)
