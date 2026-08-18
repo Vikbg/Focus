@@ -96,6 +96,20 @@ fn vpn_action_failure_is_never_reported_as_success() {
 }
 
 #[test]
+fn production_vpn_actions_remain_fail_closed_until_p3_injects_a_manager() {
+    let mut broker = ProductionPrivilegeBroker::default();
+
+    assert_eq!(
+        broker.execute(PrivilegedAction::VpnConnect { id: 9 }),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert_eq!(
+        broker.execute(PrivilegedAction::VpnDisconnect { id: 9 }),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+}
+
+#[test]
 fn docker_stop_routes_to_one_typed_docker_control_action() {
     let control = RecordingDockerControl {
         trusted: true,
@@ -109,7 +123,7 @@ fn docker_stop_routes_to_one_typed_docker_control_action() {
 }
 
 #[test]
-fn rootful_docker_start_is_not_approved_by_the_task21_broker() {
+fn rootful_docker_start_is_not_approved_by_the_task22_broker() {
     let control = RecordingDockerControl {
         trusted: true,
         ..RecordingDockerControl::default()
