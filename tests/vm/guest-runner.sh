@@ -62,11 +62,27 @@ wait_for_socket() {
   return 1
 }
 
+wait_for_restarted_service() {
+  local old_pid="$1"
+  for _ in $(seq 1 200); do
+    new_pid="$(systemctl show --property MainPID --value focusd.service)"
+    if [[ "$new_pid" =~ ^[0-9]+$ ]] \
+      && (( new_pid > 1 )) \
+      && [[ "$new_pid" != "$old_pid" ]] \
+      && systemctl is-active --quiet focusd.service; then
+      wait_for_socket /run/focus/focusd.sock
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "focusd.service did not restart with a new MainPID" >&2
+  return 1
+}
+
 run_daemon_restart_fixture() {
   command -v cargo >/dev/null 2>&1
   target_dir="/var/tmp/focus-vm-target"
-  runtime_dir="/var/tmp/focus-vm-runtime"
-  mkdir -p "$target_dir" "$runtime_dir"
+  mkdir -p "$target_dir"
 
   CARGO_TARGET_DIR="$target_dir" cargo build \
     --manifest-path /mnt/focus/Cargo.toml \
@@ -76,35 +92,54 @@ run_daemon_restart_fixture() {
 
   focusd_bin="$target_dir/debug/focusd"
   focusctl_bin="$target_dir/debug/focusctl"
-  socket="$runtime_dir/focusd.sock"
-  database="$runtime_dir/focus.db"
+  service_source="/mnt/focus/platform/linux/systemd/focusd.service"
+  env_source="$target_dir/focusd.env"
 
-  start_daemon() {
-    FOCUS_DB_PATH="$database" \
-    FOCUS_SOCKET_PATH="$socket" \
-    FOCUS_ALLOWED_UID=0 \
-    FOCUS_CLI_PATH="$focusctl_bin" \
-      "$focusd_bin" >>"$state_dir/focusd.log" 2>&1 &
-    daemon_pid=$!
-    wait_for_socket "$socket"
-  }
+  printf '%s\n' \
+    'FOCUS_ALLOWED_UID=0' \
+    'FOCUS_CLI_PATH=/usr/bin/focusctl' \
+    >"$env_source"
 
-  query_daemon() {
-    FOCUS_SOCKET_PATH="$socket" "$focusctl_bin" status | grep -F "Focus daemon: running"
-  }
+  install -D -o root -g root -m 0755 "$focusd_bin" /usr/libexec/focus/focusd
+  install -D -o root -g root -m 0755 "$focusctl_bin" /usr/bin/focusctl
+  install -D -o root -g root -m 0644 "$service_source" /etc/systemd/system/focusd.service
+  install -D -o root -g root -m 0600 "$env_source" /etc/focus/focusd.env
 
-  start_daemon
-  query_daemon
+  [[ "$(stat -c '%u:%g %a' /etc/systemd/system/focusd.service)" == "0:0 644" ]]
+  [[ "$(stat -c '%u:%g %a' /etc/focus/focusd.env)" == "0:0 600" ]]
+  [[ "$(stat -c '%u:%g %a' /usr/libexec/focus/focusd)" == "0:0 755" ]]
+  [[ "$(stat -c '%u:%g %a' /usr/bin/focusctl)" == "0:0 755" ]]
 
-  kill -TERM "$daemon_pid"
-  wait "$daemon_pid" || true
+  systemctl daemon-reload
+  systemctl enable --now focusd.service
+  systemctl is-enabled --quiet focusd.service
+  systemctl is-active --quiet focusd.service
+  wait_for_socket /run/focus/focusd.sock
 
-  start_daemon
-  query_daemon
+  [[ "$(stat -c '%u:%g %a' /run/focus)" == "0:0 750" ]]
+  [[ "$(stat -c '%u:%g %a' /var/lib/focus)" == "0:0 700" ]]
 
-  kill -INT "$daemon_pid"
-  wait "$daemon_pid"
-  [[ ! -e "$socket" ]]
+  FOCUS_SOCKET_PATH=/run/focus/focusd.sock /usr/bin/focusctl status \
+    | grep -F "Focus daemon: running"
+
+  old_pid="$(systemctl show --property MainPID --value focusd.service)"
+  [[ "$old_pid" =~ ^[0-9]+$ ]]
+  (( old_pid > 1 ))
+  kill -KILL "$old_pid"
+  wait_for_restarted_service "$old_pid"
+
+  FOCUS_SOCKET_PATH=/run/focus/focusd.sock /usr/bin/focusctl status \
+    | grep -F "Focus daemon: running"
+
+  new_pid="$(systemctl show --property MainPID --value focusd.service)"
+  [[ "$new_pid" =~ ^[0-9]+$ ]]
+  (( new_pid > 1 ))
+  [[ "$new_pid" != "$old_pid" ]]
+
+  systemctl stop focusd.service
+  ! systemctl is-active --quiet focusd.service
+  [[ ! -e /run/focus/focusd.sock ]]
+  systemctl disable focusd.service
 }
 
 run_multi_user_fixture() {
