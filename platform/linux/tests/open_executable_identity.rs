@@ -65,10 +65,7 @@ fn opened_setid_executable_is_marked_as_privilege_transition() {
 
     let observed = observe_open_executable(opened.as_fd(), ExecutionOrigin::Direct).unwrap();
 
-    assert_eq!(
-        observed.privilege_transition(),
-        PrivilegeTransition::SetId
-    );
+    assert_eq!(observed.privilege_transition(), PrivilegeTransition::SetId);
 
     fs::remove_dir_all(dir).unwrap();
 }
