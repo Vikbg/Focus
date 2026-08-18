@@ -10,10 +10,11 @@ use std::{
     path::Path,
 };
 
-use focus_core::{ExecutionOrigin, ObservedExecutable};
+use focus_core::{ExecutionOrigin, ObservedExecutable, PrivilegeTransition};
 use sha2::{Digest, Sha256};
 
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
+const SET_ID_MASK: u32 = 0o6000;
 
 /// Error returned while collecting a Linux executable identity.
 #[derive(Debug)]
@@ -113,15 +114,22 @@ fn observe_file(
     if !metadata.is_file() {
         return Err(ExecutableIdentityError::NotRegularFile);
     }
-    if metadata.permissions().mode() & 0o111 == 0 {
+    let mode = metadata.permissions().mode();
+    if mode & 0o111 == 0 {
         return Err(ExecutableIdentityError::NotExecutable);
     }
+    let privilege_transition = if mode & SET_ID_MASK != 0 {
+        PrivilegeTransition::SetId
+    } else {
+        PrivilegeTransition::None
+    };
 
     let digest = hash_open_file(file)?;
     Ok(ObservedExecutable::new(canonical_path)
         .with_filesystem_identity(metadata.dev(), metadata.ino())
         .with_digest(digest)
-        .with_origin(origin))
+        .with_origin(origin)
+        .with_privilege_transition(privilege_transition))
 }
 
 fn hash_open_file(file: &File) -> io::Result<[u8; 32]> {
