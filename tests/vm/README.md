@@ -12,7 +12,7 @@ Use a prepared x86_64 qcow2 cloud image with:
 - fanotify support
 - nftables
 - sudo with PAM and `pam_listfile`
-- `visudo`, `runuser`, `useradd`, and `userdel`
+- `visudo`, `runuser`, `chpasswd`, `useradd`, and `userdel`
 - virtio-9p guest filesystem support
 - Rust stable and Cargo for the daemon-restart, fanotify, and privilege fixtures
 
@@ -52,6 +52,6 @@ The suspend/resume scenario uses QMP from the host only to wake a guest after QE
 - `daemon-restart`: build `focusd` and `focusctl` into guest-temporary storage, force one abrupt daemon stop, verify stale-socket recovery, then verify graceful shutdown cleanup.
 - `multi-user`: start two non-root systemd user managers so the preflight multi-user condition can be exercised safely.
 - `fanotify-permission`: run every ignored `fanotify_live` fixture, prove real pre-execution deny and allow behavior, exercise the production process guard with an isolated UID and mount, and print decision-latency and idle-watchdog metrics.
-- `privilege-gate`: create an isolated NOPASSWD fixture user, prove unrestricted sudo works before arming, arm the production privilege guard, prove shell, service-control, nftables, and interpreter sudo bypasses fail, prove the typed `DockerStart` broker action still starts only the fixed `docker.service` fixture, then disarm and prove sudo availability is restored.
+- `privilege-gate`: create an isolated password-authenticated fixture user, cache a global sudo timestamp, prove the cached ticket authorizes unrestricted sudo before arming, arm the production privilege guard, prove the same cached ticket plus shell, service-control, nftables, and interpreter sudo bypasses fail, prove the typed `DockerStart` broker action still starts only the fixed `docker.service` fixture, then disarm, authenticate again, and prove sudo availability is restored.
 
 CI does not boot nested QEMU. It validates shell syntax and the harness safety contract. Real privileged enforcement tests are expected to run through this VM entry point.
