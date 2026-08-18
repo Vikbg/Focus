@@ -19,6 +19,8 @@ fanotify_live = (ROOT / "platform/linux/tests/fanotify_live.rs").read_text(encod
 privilege_live_path = ROOT / "platform/linux/tests/privilege_gate_live.rs"
 privilege_ci_path = ROOT / ".github/workflows/privilege-gate-live.yml"
 service_path = ROOT / "platform/linux/systemd/focusd.service"
+service_live_path = ROOT / "tests/vm/systemd-service-live.sh"
+service_ci_path = ROOT / ".github/workflows/systemd-service-live.yml"
 
 for scenario in TASK11_SCENARIOS + TASK12_SCENARIOS + TASK21_SCENARIOS:
     if scenario not in host:
@@ -59,12 +61,17 @@ required_guest_markers = [
     "--test privilege_gate_live",
     "--ignored",
     "--nocapture",
+    "tests/vm/systemd-service-live.sh",
 ]
 for marker in required_guest_markers:
     if marker not in guest:
         raise SystemExit(f"guest VM runner is missing {marker}")
 
-required_daemon_restart_markers = [
+if not service_live_path.is_file():
+    raise SystemExit("systemd service live fixture is missing")
+service_live = service_live_path.read_text(encoding="utf-8")
+required_service_live_markers = [
+    "systemd-detect-virt --vm",
     "/usr/libexec/focus/focusd",
     "/usr/bin/focusctl",
     "/etc/systemd/system/focusd.service",
@@ -82,9 +89,9 @@ required_daemon_restart_markers = [
     "stat -c '%u:%g %a' /run/focus",
     "stat -c '%u:%g %a' /var/lib/focus",
 ]
-for marker in required_daemon_restart_markers:
-    if marker not in guest:
-        raise SystemExit(f"daemon-restart fixture is missing {marker}")
+for marker in required_service_live_markers:
+    if marker not in service_live:
+        raise SystemExit(f"systemd service live fixture is missing {marker}")
 
 required_fanotify_fixtures = [
     "fanotify_open_exec_permission_blocks_and_allows_real_exec",
@@ -119,6 +126,19 @@ required_privilege_ci_markers = [
 for marker in required_privilege_ci_markers:
     if marker not in privilege_ci:
         raise SystemExit(f"privilege gate live CI workflow is missing {marker}")
+
+if not service_ci_path.is_file():
+    raise SystemExit("systemd service live CI workflow is missing")
+service_ci = service_ci_path.read_text(encoding="utf-8")
+required_service_ci_markers = [
+    "name: Systemd service live",
+    "runs-on: ubuntu-24.04",
+    "systemd-detect-virt --vm",
+    "tests/vm/systemd-service-live.sh",
+]
+for marker in required_service_ci_markers:
+    if marker not in service_ci:
+        raise SystemExit(f"systemd service live CI workflow is missing {marker}")
 
 if not service_path.is_file():
     raise SystemExit("focusd systemd service definition is missing")
