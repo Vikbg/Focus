@@ -64,6 +64,28 @@ for marker in required_guest_markers:
     if marker not in guest:
         raise SystemExit(f"guest VM runner is missing {marker}")
 
+required_daemon_restart_markers = [
+    "/usr/libexec/focus/focusd",
+    "/usr/bin/focusctl",
+    "/etc/systemd/system/focusd.service",
+    "/etc/focus/focusd.env",
+    "install -D -o root -g root -m 0755",
+    "install -D -o root -g root -m 0644",
+    "install -D -o root -g root -m 0600",
+    "systemctl daemon-reload",
+    "systemctl enable --now focusd.service",
+    "systemctl is-enabled --quiet focusd.service",
+    "systemctl show --property MainPID --value focusd.service",
+    'kill -KILL "$old_pid"',
+    "stat -c '%u:%g %a' /etc/systemd/system/focusd.service",
+    "stat -c '%u:%g %a' /etc/focus/focusd.env",
+    "stat -c '%u:%g %a' /run/focus",
+    "stat -c '%u:%g %a' /var/lib/focus",
+]
+for marker in required_daemon_restart_markers:
+    if marker not in guest:
+        raise SystemExit(f"daemon-restart fixture is missing {marker}")
+
 required_fanotify_fixtures = [
     "fanotify_open_exec_permission_blocks_and_allows_real_exec",
     "production_process_guard_measures_real_decisions_and_idle_wakeups",
