@@ -96,16 +96,16 @@ impl<C: Default> Default for LinuxPrivilegeBroker<C> {
 
 impl<C: DockerServiceControl> PrivilegeBrokerControl for LinuxPrivilegeBroker<C> {
     fn execute(&mut self, action: PrivilegedAction) -> Result<(), PrivilegeBrokerError> {
-        if action == PrivilegedAction::DockerStart {
-            return Err(PrivilegeBrokerError::ActionNotApproved);
-        }
-        if !self.control.executor_is_trusted()? {
-            return Err(PrivilegeBrokerError::UnsafeExecutor);
-        }
-
         match action {
-            PrivilegedAction::DockerStart => Err(PrivilegeBrokerError::ActionNotApproved),
-            PrivilegedAction::DockerStop => self.control.stop_docker(),
+            PrivilegedAction::DockerStop => {
+                if !self.control.executor_is_trusted()? {
+                    return Err(PrivilegeBrokerError::UnsafeExecutor);
+                }
+                self.control.stop_docker()
+            }
+            PrivilegedAction::VpnConnect
+            | PrivilegedAction::VpnDisconnect
+            | PrivilegedAction::DockerStart => Err(PrivilegeBrokerError::ActionNotApproved),
         }
     }
 }
