@@ -8,6 +8,7 @@ mod execution_permission;
 mod fail_closed_privilege_guard;
 mod fanotify_execution_channel;
 mod linux_process_control;
+mod nftables_guard;
 mod nix_fanotify;
 mod preflight;
 mod privilege_guard;
@@ -43,6 +44,9 @@ pub use fanotify_execution_channel::{
 pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
 };
+pub use nftables_guard::{
+    FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE, FocusNftablesCommand, FocusNftablesTransaction,
+};
 pub use nix_fanotify::NixFanotifyPermissionSource;
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
@@ -63,7 +67,7 @@ pub use process_guard::{
     ProductionProcessGuard,
 };
 pub use production_privilege_guard::ProductionPrivilegeGuard;
-pub use rustix_pidfd::RustixPidfdOps;
+pub use rustix_pidfd::RustixPidOps;
 
 use std::{
     error::Error,
