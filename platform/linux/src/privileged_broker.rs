@@ -9,6 +9,7 @@ use focus_platform::PrivilegedAction;
 
 const SYSTEMCTL_CANDIDATES: [&str; 2] = ["/usr/bin/systemctl", "/bin/systemctl"];
 const DOCKER_SERVICE: &str = "docker.service";
+const DOCKER_STOP_UNITS: [&str; 2] = ["docker.socket", DOCKER_SERVICE];
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 
 /// Error returned by the Linux typed privilege broker.
@@ -60,11 +61,11 @@ pub trait DockerServiceControl {
     /// Returns an error when the fixed service action fails.
     fn start_docker(&mut self) -> Result<(), PrivilegeBrokerError>;
 
-    /// Stops the fixed Docker service.
+    /// Stops every fixed Docker activation unit.
     ///
     /// # Errors
     ///
-    /// Returns an error when the fixed service action fails.
+    /// Returns an error when any fixed service or socket action fails.
     fn stop_docker(&mut self) -> Result<(), PrivilegeBrokerError>;
 }
 
@@ -110,7 +111,7 @@ impl<C: DockerServiceControl> PrivilegeBrokerControl for LinuxPrivilegeBroker<C>
     }
 }
 
-/// Production Docker control using only a fixed systemctl path and service name.
+/// Production Docker control using only a fixed systemctl path and fixed unit names.
 #[derive(Debug, Clone)]
 pub struct SystemctlDockerServiceControl {
     executable: Option<PathBuf>,
@@ -142,7 +143,7 @@ impl SystemctlDockerServiceControl {
         ))
     }
 
-    fn run_service_action(&self, action: &str) -> Result<(), PrivilegeBrokerError> {
+    fn run_unit_action(&self, action: &str, unit: &str) -> Result<(), PrivilegeBrokerError> {
         let Some(executable) = self.executable.as_deref() else {
             return Err(PrivilegeBrokerError::UnsafeExecutor);
         };
@@ -150,7 +151,7 @@ impl SystemctlDockerServiceControl {
             return Err(PrivilegeBrokerError::UnsafeExecutor);
         }
         let status = Command::new(executable)
-            .args([action, DOCKER_SERVICE])
+            .args([action, unit])
             .status()
             .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
         if status.success() {
@@ -170,11 +171,14 @@ impl DockerServiceControl for SystemctlDockerServiceControl {
     }
 
     fn start_docker(&mut self) -> Result<(), PrivilegeBrokerError> {
-        self.run_service_action("start")
+        self.run_unit_action("start", DOCKER_SERVICE)
     }
 
     fn stop_docker(&mut self) -> Result<(), PrivilegeBrokerError> {
-        self.run_service_action("stop")
+        for unit in DOCKER_STOP_UNITS {
+            self.run_unit_action("stop", unit)?;
+        }
+        Ok(())
     }
 }
 
@@ -183,7 +187,12 @@ pub type ProductionPrivilegeBroker = LinuxPrivilegeBroker<SystemctlDockerService
 
 #[cfg(test)]
 mod tests {
-    use super::SystemctlDockerServiceControl;
+    use super::{DOCKER_STOP_UNITS, SystemctlDockerServiceControl};
+
+    #[test]
+    fn docker_stop_disables_socket_activation_before_the_service() {
+        assert_eq!(DOCKER_STOP_UNITS, ["docker.socket", "docker.service"]);
+    }
 
     #[test]
     fn trusted_executor_requires_root_owned_non_writable_executable_file() {
