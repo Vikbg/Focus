@@ -199,9 +199,7 @@ impl<P, C, G>
     }
 }
 
-impl<P, C, G, V>
-    LinuxBackend<P, C, G, V, FailClosedPrivilegeBroker, FailClosedNetworkGuard>
-{
+impl<P, C, G, V> LinuxBackend<P, C, G, V, FailClosedPrivilegeBroker, FailClosedNetworkGuard> {
     /// Creates a Linux backend with explicit system, process-control, process-guard, and privilege
     /// guard dependencies. Network enforcement and typed privileged actions remain fail-closed.
     #[must_use]
