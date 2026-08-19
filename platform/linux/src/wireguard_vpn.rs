@@ -1,8 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
 
 use crate::{PrivilegeBrokerError, VpnActionControl};
 
 const FOCUS_WIREGUARD_CONFIG_ROOT: &str = "/etc/focus/wireguard";
+const WG_QUICK_CANDIDATES: [&str; 2] = ["/usr/bin/wg-quick", "/usr/sbin/wg-quick"];
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 const CONFIG_VISIBLE_TO_NON_OWNER: u32 = 0o077;
 
@@ -115,12 +121,34 @@ impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<
 }
 
 /// Production boundary for a fixed `wg-quick` executable and Focus-owned configuration scope.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct SystemWireGuardCommandControl;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemWireGuardCommandControl {
+    executable: Option<PathBuf>,
+}
+
+impl Default for SystemWireGuardCommandControl {
+    fn default() -> Self {
+        Self {
+            executable: WG_QUICK_CANDIDATES
+                .iter()
+                .map(PathBuf::from)
+                .find(|candidate| candidate.exists()),
+        }
+    }
+}
 
 impl SystemWireGuardCommandControl {
     fn trusted_executor_metadata(is_file: bool, owner_uid: u32, mode: u32) -> bool {
         is_file && owner_uid == 0 && mode & 0o111 != 0 && mode & WRITEABLE_BY_NON_OWNER == 0
+    }
+
+    fn trusted_config_root_metadata(
+        is_directory: bool,
+        is_symlink: bool,
+        owner_uid: u32,
+        mode: u32,
+    ) -> bool {
+        is_directory && !is_symlink && owner_uid == 0 && mode & WRITEABLE_BY_NON_OWNER == 0
     }
 
     fn trusted_config_metadata(is_file: bool, is_symlink: bool, owner_uid: u32, mode: u32) -> bool {
@@ -151,6 +179,90 @@ impl SystemWireGuardCommandControl {
             )
         })
     }
+
+    fn trusted_executor_path(path: &Path) -> Result<bool, PrivilegeBrokerError> {
+        let canonical = fs::canonicalize(path).map_err(|_| PrivilegeBrokerError::UnsafeExecutor)?;
+        let metadata = fs::metadata(canonical).map_err(|_| PrivilegeBrokerError::UnsafeExecutor)?;
+        Ok(Self::trusted_executor_metadata(
+            metadata.is_file(),
+            metadata.uid(),
+            metadata.permissions().mode() & 0o777,
+        ))
+    }
+
+    fn config_root_is_trusted() -> Result<bool, PrivilegeBrokerError> {
+        let metadata = fs::symlink_metadata(FOCUS_WIREGUARD_CONFIG_ROOT)
+            .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        Ok(Self::trusted_config_root_metadata(
+            metadata.is_dir(),
+            metadata.file_type().is_symlink(),
+            metadata.uid(),
+            metadata.permissions().mode() & 0o777,
+        ))
+    }
+
+    fn run_action(&self, action: &str, config: &Path) -> Result<(), PrivilegeBrokerError> {
+        if !self.executor_is_trusted()? {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        }
+        if !self.config_is_trusted(config)? {
+            return Err(PrivilegeBrokerError::ActionNotApproved);
+        }
+        let executable = self
+            .executable
+            .as_deref()
+            .ok_or(PrivilegeBrokerError::UnsafeExecutor)?;
+        let status = Command::new(executable)
+            .arg(action)
+            .arg(config)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(PrivilegeBrokerError::ActionFailed)
+        }
+    }
+}
+
+impl WireGuardCommandControl for SystemWireGuardCommandControl {
+    fn executor_is_trusted(&self) -> Result<bool, PrivilegeBrokerError> {
+        let Some(executable) = self.executable.as_deref() else {
+            return Ok(false);
+        };
+        Self::trusted_executor_path(executable)
+    }
+
+    fn config_is_trusted(&self, config: &Path) -> Result<bool, PrivilegeBrokerError> {
+        if !Self::config_path_is_in_scope(config) || !Self::config_root_is_trusted()? {
+            return Ok(false);
+        }
+
+        let metadata = fs::symlink_metadata(config)
+            .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        if !Self::trusted_config_metadata(
+            metadata.is_file(),
+            metadata.file_type().is_symlink(),
+            metadata.uid(),
+            metadata.permissions().mode() & 0o777,
+        ) {
+            return Ok(false);
+        }
+
+        let contents = fs::read_to_string(config).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        Ok(Self::safe_config_contents(&contents))
+    }
+
+    fn bring_up(&mut self, config: &Path) -> Result<(), PrivilegeBrokerError> {
+        self.run_action("up", config)
+    }
+
+    fn bring_down(&mut self, config: &Path) -> Result<(), PrivilegeBrokerError> {
+        self.run_action("down", config)
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +287,28 @@ mod tests {
         ));
         assert!(!SystemWireGuardCommandControl::trusted_executor_metadata(
             false, 0, 0o755
+        ));
+    }
+
+    #[test]
+    fn trusted_wireguard_config_root_is_root_owned_directory_and_not_a_symlink() {
+        assert!(SystemWireGuardCommandControl::trusted_config_root_metadata(
+            true, false, 0, 0o755
+        ));
+        assert!(SystemWireGuardCommandControl::trusted_config_root_metadata(
+            true, false, 0, 0o700
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
+            true, true, 0, 0o755
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
+            true, false, 1000, 0o755
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
+            true, false, 0, 0o775
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
+            false, false, 0, 0o755
         ));
     }
 
