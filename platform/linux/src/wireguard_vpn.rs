@@ -96,7 +96,16 @@ impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<
         self.command_control.bring_up(&config)
     }
 
-    fn disconnect_vpn(&mut self, _id: u128) -> Result<(), PrivilegeBrokerError> {
-        Err(PrivilegeBrokerError::ActionNotApproved)
+    fn disconnect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+        let config = self
+            .config_for_id(id)
+            .ok_or(PrivilegeBrokerError::ActionNotApproved)?;
+        if !self.command_control.executor_is_trusted()? {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        }
+        if !self.command_control.config_is_trusted(&config)? {
+            return Err(PrivilegeBrokerError::ActionNotApproved);
+        }
+        self.command_control.bring_down(&config)
     }
 }
