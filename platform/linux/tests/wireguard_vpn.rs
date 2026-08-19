@@ -48,3 +48,19 @@ fn approved_wireguard_profile_connects_exact_registered_config() {
     assert_eq!(control.command_control().ups, vec![config]);
     assert!(control.command_control().downs.is_empty());
 }
+
+#[test]
+fn approved_wireguard_profile_disconnects_exact_registered_config() {
+    let config = PathBuf::from("/etc/focus/wireguard/study.conf");
+    let command = RecordingWireGuardCommandControl {
+        trusted_executor: true,
+        trusted_configs: vec![config.clone()],
+        ..RecordingWireGuardCommandControl::default()
+    };
+    let profile = WireGuardProfile::new(41, config.clone());
+    let mut control = WireGuardVpnActionControl::new([profile], command);
+
+    assert_eq!(control.disconnect_vpn(41), Ok(()));
+    assert_eq!(control.command_control().downs, vec![config]);
+    assert!(control.command_control().ups.is_empty());
+}
