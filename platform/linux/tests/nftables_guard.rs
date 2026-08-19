@@ -127,7 +127,10 @@ fn task24_requires_real_nftables_live_gate() {
         "SystemNftablesControl::default()",
         "reload_focus_nftables",
     ] {
-        assert!(live.contains(marker), "nftables live test is missing {marker}");
+        assert!(
+            live.contains(marker),
+            "nftables live test is missing {marker}"
+        );
     }
 
     for marker in [
@@ -139,6 +142,9 @@ fn task24_requires_real_nftables_live_gate() {
         "--ignored",
         "--nocapture",
     ] {
-        assert!(workflow.contains(marker), "nftables live workflow is missing {marker}");
+        assert!(
+            workflow.contains(marker),
+            "nftables live workflow is missing {marker}"
+        );
     }
 }
