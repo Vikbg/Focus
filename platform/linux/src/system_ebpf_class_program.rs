@@ -104,7 +104,11 @@ impl SystemEgressClassProgramControl {
     }
 
     fn expected_keys(rules: &[Ipv4EgressRule]) -> BTreeSet<u64> {
-        rules.iter().map(Ipv4EgressRule::map_key).collect()
+        rules
+            .iter()
+            .copied()
+            .map(Ipv4EgressRule::map_key)
+            .collect()
     }
 
     fn replace_loaded_rules(
