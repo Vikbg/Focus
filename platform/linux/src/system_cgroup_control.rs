@@ -107,13 +107,42 @@ impl SystemCgroupControl {
         }
     }
 
-    fn write_process(path: &Path, lifetime: ProcessLifetime) -> Result<(), FocusCgroupError> {
+    fn write_pid(path: &Path, pid: u32) -> Result<(), FocusCgroupError> {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .open(path.join(CGROUP_PROCS))
             .map_err(|_| FocusCgroupError::PlacementFailed)?;
-        write!(file, "{}", lifetime.pid()).map_err(|_| FocusCgroupError::PlacementFailed)?;
+        write!(file, "{pid}").map_err(|_| FocusCgroupError::PlacementFailed)?;
         file.flush().map_err(|_| FocusCgroupError::PlacementFailed)
+    }
+
+    fn write_process(path: &Path, lifetime: ProcessLifetime) -> Result<(), FocusCgroupError> {
+        Self::write_pid(path, lifetime.pid())
+    }
+
+    fn quarantine_pid(self, pid: u32) -> Result<(), FocusCgroupError> {
+        let blocked = self.require_existing_safe_class(
+            FocusCgroupClass::Blocked,
+            FocusCgroupError::PlacementFailed,
+        )?;
+        Self::write_pid(&blocked, pid)
+    }
+
+    fn finish_placement<R, Q>(
+        lifetime: ProcessLifetime,
+        revalidate: R,
+        quarantine: Q,
+    ) -> Result<(), FocusCgroupError>
+    where
+        R: FnOnce(ProcessLifetime) -> Result<(), FocusCgroupError>,
+        Q: FnOnce(u32) -> Result<(), FocusCgroupError>,
+    {
+        if revalidate(lifetime).is_ok() {
+            return Ok(());
+        }
+
+        quarantine(lifetime.pid()).map_err(|_| FocusCgroupError::PlacementFailed)?;
+        Err(FocusCgroupError::PlacementFailed)
     }
 
     fn class_contains(path: &Path, pid: u32) -> Result<bool, FocusCgroupError> {
@@ -151,7 +180,12 @@ impl FocusCgroupControl for SystemCgroupControl {
         Self::revalidate_lifetime(lifetime, FocusCgroupError::PlacementFailed)?;
         let path = self.require_existing_safe_class(class, FocusCgroupError::PlacementFailed)?;
         Self::write_process(&path, lifetime)?;
-        Self::revalidate_lifetime(lifetime, FocusCgroupError::PlacementFailed)
+        let control = *self;
+        Self::finish_placement(
+            lifetime,
+            |expected| Self::revalidate_lifetime(expected, FocusCgroupError::PlacementFailed),
+            |pid| control.quarantine_pid(pid),
+        )
     }
 
     fn verify_process(
