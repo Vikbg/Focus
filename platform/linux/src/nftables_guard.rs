@@ -206,9 +206,7 @@ impl SystemNftablesControl {
                     .map_err(|_| FocusNftablesError::ApplyFailed)
             });
         drop(child.stdin.take());
-        let status = child
-            .wait()
-            .map_err(|_| FocusNftablesError::ApplyFailed)?;
+        let status = child.wait().map_err(|_| FocusNftablesError::ApplyFailed)?;
         write_result?;
         if status.success() {
             Ok(())
