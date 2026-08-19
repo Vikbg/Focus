@@ -76,7 +76,10 @@ impl Drop for FixtureCleanup {
 #[test]
 #[ignore = "requires disposable root VM with nftables"]
 fn focus_reload_preserves_real_unrelated_table_and_replaces_stale_focus_state() {
-    assert_eq!(env::var("FOCUS_VM_SCENARIO").as_deref(), Ok("nftables-live"));
+    assert_eq!(
+        env::var("FOCUS_VM_SCENARIO").as_deref(),
+        Ok("nftables-live")
+    );
 
     let uid = Command::new("/usr/bin/id")
         .arg("-u")
