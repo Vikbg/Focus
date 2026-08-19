@@ -1,3 +1,5 @@
+use std::{error::Error, fmt};
+
 use focus_core::{ExecutableMatcher, ObservedExecutable};
 
 /// Fixed Focus-owned process classes reserved for cgroup-aware network enforcement.
@@ -83,6 +85,78 @@ impl FocusCgroupClassClassifier {
             FocusCgroupClass::System
         }
     }
+}
+
+/// Error returned while preparing or mutating Focus-owned cgroup classes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusCgroupError {
+    InvalidPid,
+    PreparationFailed,
+    PlacementFailed,
+    VerificationFailed,
+}
+
+impl fmt::Display for FocusCgroupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidPid => formatter.write_str("invalid process id for Focus cgroup placement"),
+            Self::PreparationFailed => formatter.write_str("Focus cgroup classes could not be prepared"),
+            Self::PlacementFailed => formatter.write_str("process could not be placed in its Focus cgroup class"),
+            Self::VerificationFailed => formatter.write_str("Focus cgroup process placement could not be verified"),
+        }
+    }
+}
+
+impl Error for FocusCgroupError {}
+
+/// Narrow cgroup authority limited to the fixed Focus process classes.
+pub trait FocusCgroupControl {
+    /// Prepares the complete fixed set of Focus-owned cgroup classes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the classes cannot be prepared safely.
+    fn prepare_classes(&mut self) -> Result<(), FocusCgroupError>;
+
+    /// Places one nonzero process ID into a fixed Focus cgroup class.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the process cannot be placed safely.
+    fn place_pid(&mut self, class: FocusCgroupClass, pid: u32) -> Result<(), FocusCgroupError>;
+
+    /// Verifies that one process ID belongs to the expected fixed Focus cgroup class.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when membership cannot be verified exactly.
+    fn verify_pid(&mut self, class: FocusCgroupClass, pid: u32) -> Result<(), FocusCgroupError>;
+}
+
+/// Classifies a process, places it into the matching fixed Focus cgroup, and verifies membership.
+///
+/// Unknown or ambiguous executable identity is classified as [`FocusCgroupClass::Blocked`] before
+/// any placement is requested. PID zero is rejected before any cgroup mutation.
+///
+/// # Errors
+///
+/// Returns the underlying cgroup control error when preparation, placement, or verification fails,
+/// or [`FocusCgroupError::InvalidPid`] when `pid` is zero.
+pub fn place_classified_process<C: FocusCgroupControl>(
+    control: &mut C,
+    classifier: &FocusCgroupClassClassifier,
+    pid: u32,
+    executable: &ObservedExecutable,
+) -> Result<FocusCgroupClass, FocusCgroupError> {
+    if pid == 0 {
+        return Err(FocusCgroupError::InvalidPid);
+    }
+
+    let class = classifier.classify(executable);
+    control.prepare_classes()?;
+    control.place_pid(class, pid)?;
+    control.verify_pid(class, pid)?;
+    Ok(class)
 }
 
 fn matches_any(matchers: &[ExecutableMatcher], executable: &ObservedExecutable) -> bool {
