@@ -23,7 +23,10 @@ mod rustix_pidfd;
 mod systemd;
 
 pub use backend::{LinuxBackend, ProductionLinuxBackend};
-pub use cgroup_process_class::{FocusCgroupClass, FocusCgroupClassClassifier};
+pub use cgroup_process_class::{
+    FocusCgroupClass, FocusCgroupClassClassifier, FocusCgroupControl, FocusCgroupError,
+    place_classified_process,
+};
 pub use executable_identity::{
     ExecutableIdentityError, observe_executable, observe_open_executable,
 };
