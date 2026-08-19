@@ -241,8 +241,8 @@ impl WireGuardCommandControl for SystemWireGuardCommandControl {
             return Ok(false);
         }
 
-        let metadata = fs::symlink_metadata(config)
-            .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        let metadata =
+            fs::symlink_metadata(config).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
         if !Self::trusted_config_metadata(
             metadata.is_file(),
             metadata.file_type().is_symlink(),
@@ -252,7 +252,8 @@ impl WireGuardCommandControl for SystemWireGuardCommandControl {
             return Ok(false);
         }
 
-        let contents = fs::read_to_string(config).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        let contents =
+            fs::read_to_string(config).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
         Ok(Self::safe_config_contents(&contents))
     }
 
@@ -298,18 +299,16 @@ mod tests {
         assert!(SystemWireGuardCommandControl::trusted_config_root_metadata(
             true, false, 0, 0o700
         ));
-        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
-            true, true, 0, 0o755
-        ));
-        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
-            true, false, 1000, 0o755
-        ));
-        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
-            true, false, 0, 0o775
-        ));
-        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(
-            false, false, 0, 0o755
-        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_root_metadata(true, true, 0, 0o755));
+        assert!(
+            !SystemWireGuardCommandControl::trusted_config_root_metadata(true, false, 1000, 0o755)
+        );
+        assert!(
+            !SystemWireGuardCommandControl::trusted_config_root_metadata(true, false, 0, 0o775)
+        );
+        assert!(
+            !SystemWireGuardCommandControl::trusted_config_root_metadata(false, false, 0, 0o755)
+        );
     }
 
     #[test]
