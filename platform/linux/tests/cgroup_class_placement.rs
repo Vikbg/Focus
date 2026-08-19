@@ -54,12 +54,8 @@ fn classified_browser_is_placed_and_verified_in_browser_class() {
 
 #[test]
 fn unknown_process_is_placed_in_blocked_class() {
-    let classifier = FocusCgroupClassClassifier::new(
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
+    let classifier =
+        FocusCgroupClassClassifier::new(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let executable = ObservedExecutable::new("/opt/unknown").with_digest([0x52; 32]);
     let mut control = RecordingControl::default();
 
@@ -72,12 +68,8 @@ fn unknown_process_is_placed_in_blocked_class() {
 
 #[test]
 fn placement_failure_is_never_reported_as_success() {
-    let classifier = FocusCgroupClassClassifier::new(
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
+    let classifier =
+        FocusCgroupClassClassifier::new(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let executable = ObservedExecutable::new("/opt/unknown").with_digest([0x53; 32]);
     let mut control = RecordingControl {
         fail_place: true,
