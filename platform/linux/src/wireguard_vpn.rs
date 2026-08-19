@@ -123,12 +123,7 @@ impl SystemWireGuardCommandControl {
         is_file && owner_uid == 0 && mode & 0o111 != 0 && mode & WRITEABLE_BY_NON_OWNER == 0
     }
 
-    fn trusted_config_metadata(
-        is_file: bool,
-        is_symlink: bool,
-        owner_uid: u32,
-        mode: u32,
-    ) -> bool {
+    fn trusted_config_metadata(is_file: bool, is_symlink: bool, owner_uid: u32, mode: u32) -> bool {
         is_file
             && !is_symlink
             && owner_uid == 0
