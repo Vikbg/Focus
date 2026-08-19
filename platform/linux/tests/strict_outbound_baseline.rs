@@ -44,7 +44,10 @@ fn task25_requires_real_strict_outbound_traffic_gate() {
         "disarm()",
         "strict-outbound-live",
     ] {
-        assert!(live.contains(marker), "strict outbound live test is missing {marker}");
+        assert!(
+            live.contains(marker),
+            "strict outbound live test is missing {marker}"
+        );
     }
 
     for marker in [
