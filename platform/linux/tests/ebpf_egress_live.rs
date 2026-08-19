@@ -165,11 +165,7 @@ fn per_class_ebpf_egress_allows_exact_rules_and_denies_everything_else() {
         "browser class must reach its exact allowed endpoint"
     );
     assert!(
-        !probe_from_class(
-            FocusCgroupClass::Browser,
-            development_port,
-            &mut cgroups
-        ),
+        !probe_from_class(FocusCgroupClass::Browser, development_port, &mut cgroups),
         "browser class must not inherit the development endpoint"
     );
     assert!(
