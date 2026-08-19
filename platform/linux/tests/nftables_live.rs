@@ -5,7 +5,10 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-use focus_linux::{FocusNftablesTransaction, SystemNftablesControl, reload_focus_nftables};
+use focus_linux::{
+    FocusNftablesControl, FocusNftablesError, FocusNftablesTransaction, SystemNftablesControl,
+    reload_focus_nftables, remove_focus_nftables,
+};
 
 const FOCUS_TABLE: &str = "focus";
 const UNRELATED_TABLE: &str = "unrelated_fixture";
@@ -49,6 +52,15 @@ fn require_nft_script(script: &str) {
 
 fn destroy_fixture_table(table: &str) {
     let _ = run_nft_script(&format!("destroy table inet {table}\n"));
+}
+
+fn table_exists(table: &str) -> bool {
+    Command::new(nft_executable())
+        .args(["list", "table", "inet", table])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn list_table(table: &str) -> String {
@@ -121,6 +133,11 @@ fn focus_reload_preserves_real_unrelated_table_and_replaces_stale_focus_state() 
 
     require_nft_script("add chain inet focus stale_focus_fixture\n");
     assert!(list_table(FOCUS_TABLE).contains(STALE_FOCUS_CHAIN));
+    assert_eq!(
+        control.verify_focus_table(&transaction),
+        Err(FocusNftablesError::VerificationFailed)
+    );
+    assert_eq!(list_table(UNRELATED_TABLE), unrelated_before);
 
     reload_focus_nftables(&mut control, &transaction).expect("second Focus reload failed");
 
@@ -128,4 +145,12 @@ fn focus_reload_preserves_real_unrelated_table_and_replaces_stale_focus_state() 
     let second_focus_state = list_table(FOCUS_TABLE);
     assert!(!second_focus_state.contains(STALE_FOCUS_CHAIN));
     assert_eq!(second_focus_state, first_focus_state);
+
+    remove_focus_nftables(&mut control).expect("Focus removal failed");
+    assert!(!table_exists(FOCUS_TABLE));
+    assert_eq!(list_table(UNRELATED_TABLE), unrelated_before);
+
+    remove_focus_nftables(&mut control).expect("second Focus removal failed");
+    assert!(!table_exists(FOCUS_TABLE));
+    assert_eq!(list_table(UNRELATED_TABLE), unrelated_before);
 }
