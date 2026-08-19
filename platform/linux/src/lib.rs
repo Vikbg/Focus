@@ -20,6 +20,7 @@ mod process_closer;
 mod process_guard;
 mod production_privilege_guard;
 mod rustix_pidfd;
+mod system_cgroup_control;
 mod systemd;
 
 pub use backend::{LinuxBackend, ProductionLinuxBackend};
@@ -80,6 +81,7 @@ pub use process_guard::{
 };
 pub use production_privilege_guard::ProductionPrivilegeGuard;
 pub use rustix_pidfd::RustixPidfdOps;
+pub use system_cgroup_control::{FOCUS_CGROUP_ROOT, SystemCgroupControl};
 
 use std::{
     error::Error,
