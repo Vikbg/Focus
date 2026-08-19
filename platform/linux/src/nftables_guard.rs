@@ -123,7 +123,7 @@ impl FocusNftablesCommand {
                  \t\ttype ipv6_addr\n\
                  \t}}\n\
                  \tchain {FOCUS_NFT_OUTPUT_CHAIN} {{\n\
-                 \t\ttype filter hook output priority 0; policy accept;\n\
+                 \t\ttype filter hook output priority 0; policy drop;\n\
                  \t}}\n\
                  }}"
             ),
@@ -138,12 +138,18 @@ pub struct FocusNftablesTransaction {
 }
 
 impl FocusNftablesTransaction {
-    /// Creates the minimal Focus-owned nftables transaction.
+    /// Creates the strict default-deny Focus-owned nftables transaction.
     #[must_use]
     pub fn new() -> Self {
         Self {
             commands: vec![FocusNftablesCommand::desired_table()],
         }
+    }
+
+    /// Creates the strict outbound baseline used while a strict session is protected.
+    #[must_use]
+    pub fn strict_outbound() -> Self {
+        Self::new()
     }
 
     /// Returns the typed commands in application order.
