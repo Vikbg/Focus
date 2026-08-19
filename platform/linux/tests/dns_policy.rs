@@ -41,11 +41,7 @@ fn stale_policy_version_never_contributes_allow_state() {
         old_version,
     ));
 
-    assert!(
-        state
-            .allowed_addresses(299, old_version)
-            .contains(&address)
-    );
+    assert!(state.allowed_addresses(299, old_version).contains(&address));
     assert!(state.allowed_addresses(299, current_version).is_empty());
 }
 
