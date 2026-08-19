@@ -170,3 +170,26 @@ impl FocusCgroupControl for SystemCgroupControl {
         Self::revalidate_lifetime(lifetime, FocusCgroupError::VerificationFailed)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{FocusCgroupError, ProcessLifetime, SystemCgroupControl};
+
+    #[test]
+    fn post_write_lifetime_mismatch_requires_blocked_quarantine() {
+        let lifetime = ProcessLifetime::new(4242, 9191);
+        let mut quarantined = Vec::new();
+
+        let result = SystemCgroupControl::finish_placement(
+            lifetime,
+            |_| Err(FocusCgroupError::PlacementFailed),
+            |pid| {
+                quarantined.push(pid);
+                Ok(())
+            },
+        );
+
+        assert_eq!(result, Err(FocusCgroupError::PlacementFailed));
+        assert_eq!(quarantined, vec![4242]);
+    }
+}
