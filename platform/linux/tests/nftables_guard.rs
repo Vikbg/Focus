@@ -126,7 +126,6 @@ fn task24_requires_real_nftables_live_gate() {
         "stale_focus_fixture",
         "SystemNftablesControl::default()",
         "reload_focus_nftables",
-        "--ignored",
     ] {
         assert!(live.contains(marker), "nftables live test is missing {marker}");
     }
