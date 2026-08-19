@@ -29,7 +29,10 @@ pub use cgroup_process_class::{
     FocusCgroupClass, FocusCgroupClassClassifier, FocusCgroupControl, FocusCgroupError,
     place_classified_process,
 };
-pub use ebpf_egress_policy::{EgressProtocol, EgressRuleError, Ipv4EgressRule};
+pub use ebpf_egress_policy::{
+    EgressAllowMap, EgressMapError, EgressProtocol, EgressRuleError, Ipv4EgressRule,
+    replace_egress_rules,
+};
 pub use executable_identity::{
     ExecutableIdentityError, observe_executable, observe_open_executable,
 };
