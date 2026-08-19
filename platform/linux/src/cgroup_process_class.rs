@@ -31,10 +31,10 @@ impl FocusCgroupClass {
 /// build-tool parent. Unknown or ambiguous observations fail closed to the blocked class.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FocusCgroupClassClassifier {
-    browser_matchers: Vec<ExecutableMatcher>,
-    development_parent_matchers: Vec<ExecutableMatcher>,
-    vpn_matchers: Vec<ExecutableMatcher>,
-    system_matchers: Vec<ExecutableMatcher>,
+    browser: Vec<ExecutableMatcher>,
+    development_parents: Vec<ExecutableMatcher>,
+    vpn: Vec<ExecutableMatcher>,
+    system: Vec<ExecutableMatcher>,
 }
 
 impl FocusCgroupClassClassifier {
@@ -47,10 +47,10 @@ impl FocusCgroupClassClassifier {
         system_matchers: Vec<ExecutableMatcher>,
     ) -> Self {
         Self {
-            browser_matchers,
-            development_parent_matchers,
-            vpn_matchers,
-            system_matchers,
+            browser: browser_matchers,
+            development_parents: development_parent_matchers,
+            vpn: vpn_matchers,
+            system: system_matchers,
         }
     }
 
@@ -59,12 +59,12 @@ impl FocusCgroupClassClassifier {
     /// Multiple matching classes are treated as ambiguous and therefore blocked.
     #[must_use]
     pub fn classify(&self, executable: &ObservedExecutable) -> FocusCgroupClass {
-        let browser = matches_any(&self.browser_matchers, executable);
+        let browser = matches_any(&self.browser, executable);
         let development = executable
             .parent()
-            .is_some_and(|parent| matches_any(&self.development_parent_matchers, parent));
-        let vpn = matches_any(&self.vpn_matchers, executable);
-        let system = matches_any(&self.system_matchers, executable);
+            .is_some_and(|parent| matches_any(&self.development_parents, parent));
+        let vpn = matches_any(&self.vpn, executable);
+        let system = matches_any(&self.system, executable);
         let match_count = usize::from(browser)
             + usize::from(development)
             + usize::from(vpn)
