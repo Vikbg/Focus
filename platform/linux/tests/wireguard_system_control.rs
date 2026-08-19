@@ -31,7 +31,9 @@ fn production_wireguard_control_uses_only_fixed_trusted_wg_quick_and_config_scop
         "PermissionsExt",
         "fs::read_to_string",
         "trusted_config_root_metadata",
+        "FOCUS_CONFIG_ROOT",
         "FOCUS_WIREGUARD_CONFIG_ROOT",
+        "config_roots_are_trusted",
         "safe_config_contents",
     ] {
         assert!(
