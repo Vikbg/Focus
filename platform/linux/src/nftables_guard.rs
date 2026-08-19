@@ -25,9 +25,10 @@ const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 pub enum FocusNftablesError {
     UnsafeExecutor,
     ApplyFailed,
+    VerificationFailed,
 }
 
-/// Narrow nftables mutation authority limited to replacing the Focus-owned table.
+/// Narrow nftables authority limited to the Focus-owned table.
 pub trait FocusNftablesControl {
     /// Replaces the complete Focus-owned nftables table with the desired transaction.
     ///
@@ -38,18 +39,47 @@ pub trait FocusNftablesControl {
         &mut self,
         transaction: &FocusNftablesTransaction,
     ) -> Result<(), FocusNftablesError>;
+
+    /// Verifies that the complete Focus-owned table matches the desired transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Focus-owned table cannot be read back exactly.
+    fn verify_focus_table(
+        &mut self,
+        transaction: &FocusNftablesTransaction,
+    ) -> Result<(), FocusNftablesError>;
+
+    /// Removes only the Focus-owned nftables table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Focus-owned table cannot be removed safely.
+    fn remove_focus_table(&mut self) -> Result<(), FocusNftablesError>;
 }
 
-/// Replaces only Focus-owned nftables state.
+/// Replaces and verifies only Focus-owned nftables state.
 ///
 /// # Errors
 ///
-/// Returns the underlying control error when the Focus table cannot be replaced safely.
+/// Returns the underlying control error when replacement or verification fails.
 pub fn reload_focus_nftables<C: FocusNftablesControl>(
     control: &mut C,
     transaction: &FocusNftablesTransaction,
 ) -> Result<(), FocusNftablesError> {
-    control.replace_focus_table(transaction)
+    control.replace_focus_table(transaction)?;
+    control.verify_focus_table(transaction)
+}
+
+/// Removes only Focus-owned nftables state.
+///
+/// # Errors
+///
+/// Returns the underlying control error when the Focus-owned table cannot be removed safely.
+pub fn remove_focus_nftables<C: FocusNftablesControl>(
+    control: &mut C,
+) -> Result<(), FocusNftablesError> {
+    control.remove_focus_table()
 }
 
 /// One nftables command whose ownership scope is fixed to the Focus table.
@@ -181,14 +211,18 @@ impl SystemNftablesControl {
         ))
     }
 
-    fn apply_script(&self, script: &str) -> Result<(), FocusNftablesError> {
+    fn trusted_executable(&self) -> Result<&Path, FocusNftablesError> {
         let Some(executable) = self.executable.as_deref() else {
             return Err(FocusNftablesError::UnsafeExecutor);
         };
         if !Self::trusted_path(executable)? {
             return Err(FocusNftablesError::UnsafeExecutor);
         }
+        Ok(executable)
+    }
 
+    fn apply_script(&self, script: &str) -> Result<(), FocusNftablesError> {
+        let executable = self.trusted_executable()?;
         let mut child = Command::new(executable)
             .args(["-f", "-"])
             .stdin(Stdio::piped())
@@ -214,6 +248,35 @@ impl SystemNftablesControl {
             Err(FocusNftablesError::ApplyFailed)
         }
     }
+
+    fn read_focus_table(&self) -> Result<String, FocusNftablesError> {
+        let executable = self.trusted_executable()?;
+        let output = Command::new(executable)
+            .args([
+                "-y",
+                "list",
+                "table",
+                FOCUS_NFT_FAMILY,
+                FOCUS_NFT_TABLE,
+            ])
+            .output()
+            .map_err(|_| FocusNftablesError::VerificationFailed)?;
+        if !output.status.success() {
+            return Err(FocusNftablesError::VerificationFailed);
+        }
+        String::from_utf8(output.stdout).map_err(|_| FocusNftablesError::VerificationFailed)
+    }
+
+    fn normalize_listing(listing: &str) -> String {
+        let mut normalized = String::new();
+        for token in listing.split_whitespace() {
+            if !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.push_str(token);
+        }
+        normalized
+    }
 }
 
 impl FocusNftablesControl for SystemNftablesControl {
@@ -222,6 +285,24 @@ impl FocusNftablesControl for SystemNftablesControl {
         transaction: &FocusNftablesTransaction,
     ) -> Result<(), FocusNftablesError> {
         self.apply_script(&transaction.replacement_script())
+    }
+
+    fn verify_focus_table(
+        &mut self,
+        transaction: &FocusNftablesTransaction,
+    ) -> Result<(), FocusNftablesError> {
+        let observed = self.read_focus_table()?;
+        if Self::normalize_listing(&observed) == Self::normalize_listing(&transaction.render()) {
+            Ok(())
+        } else {
+            Err(FocusNftablesError::VerificationFailed)
+        }
+    }
+
+    fn remove_focus_table(&mut self) -> Result<(), FocusNftablesError> {
+        self.apply_script(&format!(
+            "destroy table {FOCUS_NFT_FAMILY} {FOCUS_NFT_TABLE}\n"
+        ))
     }
 }
 
