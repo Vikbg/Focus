@@ -6,7 +6,10 @@ use std::{
 use focus_core::PolicyVersion;
 
 fn canonical_domain(domain: &str) -> String {
-    domain.strip_suffix('.').unwrap_or(domain).to_ascii_lowercase()
+    domain
+        .strip_suffix('.')
+        .unwrap_or(domain)
+        .to_ascii_lowercase()
 }
 
 /// One policy-owned DNS resolution with an absolute expiration time.
