@@ -8,6 +8,7 @@ mod execution_permission;
 mod fail_closed_privilege_guard;
 mod fanotify_execution_channel;
 mod linux_process_control;
+mod nftables_guard;
 mod nix_fanotify;
 mod preflight;
 mod privilege_guard;
@@ -42,6 +43,12 @@ pub use fanotify_execution_channel::{
 };
 pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
+};
+pub use nftables_guard::{
+    FOCUS_NFT_BLOCKED_IPV4_SET, FOCUS_NFT_BLOCKED_IPV6_SET, FOCUS_NFT_FAMILY,
+    FOCUS_NFT_OUTPUT_CHAIN, FOCUS_NFT_TABLE, FocusNftablesCommand, FocusNftablesControl,
+    FocusNftablesError, FocusNftablesTransaction, SystemNftablesControl, reload_focus_nftables,
+    remove_focus_nftables,
 };
 pub use nix_fanotify::NixFanotifyPermissionSource;
 pub use preflight::{
