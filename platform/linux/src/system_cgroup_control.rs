@@ -77,7 +77,7 @@ impl SystemCgroupControl {
     }
 
     fn require_existing_safe_class(
-        &self,
+        self,
         class: FocusCgroupClass,
         error: FocusCgroupError,
     ) -> Result<PathBuf, FocusCgroupError> {
