@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{PrivilegeBrokerError, VpnActionControl};
 
-/// One pre-approved WireGuard profile bound to a stable Focus VPN id.
+/// One pre-approved `WireGuard` profile bound to a stable Focus VPN id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireGuardProfile {
     id: u128,
@@ -17,9 +17,9 @@ impl WireGuardProfile {
     }
 }
 
-/// Narrow command dependency used by the WireGuard VPN adapter.
+/// Narrow command dependency used by the `WireGuard` VPN adapter.
 pub trait WireGuardCommandControl {
-    /// Returns whether the fixed WireGuard executor is trusted.
+    /// Returns whether the fixed `WireGuard` executor is trusted.
     ///
     /// # Errors
     ///
@@ -33,22 +33,22 @@ pub trait WireGuardCommandControl {
     /// Returns an error when configuration trust cannot be established safely.
     fn config_is_trusted(&self, config: &Path) -> Result<bool, PrivilegeBrokerError>;
 
-    /// Brings up one trusted registered WireGuard configuration.
+    /// Brings up one trusted registered `WireGuard` configuration.
     ///
     /// # Errors
     ///
-    /// Returns an error when the WireGuard command fails.
+    /// Returns an error when the `WireGuard` command fails.
     fn bring_up(&mut self, config: &Path) -> Result<(), PrivilegeBrokerError>;
 
-    /// Brings down one trusted registered WireGuard configuration.
+    /// Brings down one trusted registered `WireGuard` configuration.
     ///
     /// # Errors
     ///
-    /// Returns an error when the WireGuard command fails.
+    /// Returns an error when the `WireGuard` command fails.
     fn bring_down(&mut self, config: &Path) -> Result<(), PrivilegeBrokerError>;
 }
 
-/// Provider-specific WireGuard implementation of the provider-neutral VPN action contract.
+/// Provider-specific `WireGuard` implementation of the provider-neutral VPN action contract.
 #[derive(Debug)]
 pub struct WireGuardVpnActionControl<C> {
     profiles: Vec<WireGuardProfile>,
