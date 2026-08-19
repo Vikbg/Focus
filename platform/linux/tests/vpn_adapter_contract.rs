@@ -37,10 +37,8 @@ fn wireguard_implements_provider_neutral_vpn_adapter_contract() {
 
     let config = PathBuf::from("/etc/focus/wireguard/study.conf");
     let profile = WireGuardProfile::new(41, config.clone());
-    let mut adapter = WireGuardVpnActionControl::new(
-        [profile],
-        RecordingWireGuardCommandControl::default(),
-    );
+    let mut adapter =
+        WireGuardVpnActionControl::new([profile], RecordingWireGuardCommandControl::default());
 
     assert_eq!(adapter.connect(41), Ok(()));
     assert_eq!(adapter.command_control().ups, vec![config]);
