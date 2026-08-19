@@ -65,8 +65,10 @@ impl FocusCgroupClassClassifier {
             .is_some_and(|parent| matches_any(&self.development_parent_matchers, parent));
         let vpn = matches_any(&self.vpn_matchers, executable);
         let system = matches_any(&self.system_matchers, executable);
-        let match_count =
-            usize::from(browser) + usize::from(development) + usize::from(vpn) + usize::from(system);
+        let match_count = usize::from(browser)
+            + usize::from(development)
+            + usize::from(vpn)
+            + usize::from(system);
 
         if match_count != 1 {
             return FocusCgroupClass::Blocked;
