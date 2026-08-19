@@ -37,6 +37,15 @@ fn production_ebpf_control_implements_the_typed_program_authority() {
 }
 
 #[test]
+fn production_verification_requires_a_live_cgroup_kernel_link() {
+    let source = repo_source();
+
+    assert!(source.contains("loaded_links()"));
+    assert!(source.contains("LinkType::Cgroup"));
+    assert!(source.contains("program_id() == expected_program_id"));
+}
+
+#[test]
 fn production_ebpf_api_exposes_no_caller_selected_paths() {
     let source = repo_source();
 
