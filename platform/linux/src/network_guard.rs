@@ -6,6 +6,7 @@ use crate::{
 /// Error returned by strict outbound network-guard operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkGuardError {
+    Unavailable,
     Nftables(FocusNftablesError),
 }
 
@@ -37,6 +38,24 @@ pub trait NetworkGuardControl {
     ///
     /// Returns an error when the Focus-owned nftables table cannot be removed safely.
     fn disarm(&mut self) -> Result<(), NetworkGuardError>;
+}
+
+/// Fail-closed network guard used when no production network controller is installed.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct FailClosedNetworkGuard;
+
+impl NetworkGuardControl for FailClosedNetworkGuard {
+    fn arm(&mut self) -> Result<(), NetworkGuardError> {
+        Err(NetworkGuardError::Unavailable)
+    }
+
+    fn verify(&mut self) -> Result<(), NetworkGuardError> {
+        Err(NetworkGuardError::Unavailable)
+    }
+
+    fn disarm(&mut self) -> Result<(), NetworkGuardError> {
+        Err(NetworkGuardError::Unavailable)
+    }
 }
 
 /// Production strict outbound network guard backed by Focus-owned nftables state.
