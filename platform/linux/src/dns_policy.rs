@@ -5,6 +5,10 @@ use std::{
 
 use focus_core::PolicyVersion;
 
+fn canonical_domain(domain: &str) -> String {
+    domain.strip_suffix('.').unwrap_or(domain).to_ascii_lowercase()
+}
+
 /// One policy-owned DNS resolution with an absolute expiration time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsResolutionEntry {
@@ -23,15 +27,16 @@ impl DnsResolutionEntry {
         expires_at_unix_seconds: u64,
         policy_version: PolicyVersion,
     ) -> Self {
+        let domain = domain.into();
         Self {
-            domain: domain.into(),
+            domain: canonical_domain(&domain),
             addresses: addresses.into_iter().collect(),
             expires_at_unix_seconds,
             policy_version,
         }
     }
 
-    /// Returns the domain represented by this resolution.
+    /// Returns the canonical domain represented by this resolution.
     #[must_use]
     pub fn domain(&self) -> &str {
         &self.domain
