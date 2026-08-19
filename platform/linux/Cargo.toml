@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+aya = { version = "=0.14.0", default-features = false }
 focus-core = { path = "../../crates/focus-core", version = "=0.0.0" }
 focus-platform = { path = "../../crates/focus-platform", version = "=0.0.0" }
 nix = { version = "=0.31.3", features = ["event", "fanotify", "poll", "time", "user"] }

@@ -1,0 +1,58 @@
+name: eBPF build
+
+on:
+  push:
+    branches:
+      - "main"
+      - "agent/**"
+    paths:
+      - "platform/linux/ebpf/**"
+      - ".github/workflows/ebpf-build.yml"
+  pull_request:
+    paths:
+      - "platform/linux/ebpf/**"
+      - ".github/workflows/ebpf-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ebpf-build-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  task27-ebpf-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install pinned Rust nightly with eBPF sources
+        run: rustup toolchain install nightly-2026-08-19 --profile minimal --component rust-src
+
+      - name: Install pinned bpf-linker release
+        run: |
+          curl \
+            --fail \
+            --location \
+            --proto '=https' \
+            --tlsv1.2 \
+            --output /tmp/bpf-linker.tar.zst \
+            https://github.com/aya-rs/bpf-linker/releases/download/v0.11.0/bpf-linker-x86_64-unknown-linux-musl.tar.zst
+          echo "10f62ba9ab7e544d538370552660efcb4f1a19153d5752bbf0f6b51f3bada450  /tmp/bpf-linker.tar.zst" | sha256sum --check --strict
+          mkdir -p "$HOME/.local/bin"
+          tar -xpf /tmp/bpf-linker.tar.zst -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/bpf-linker" --version
+
+      - name: Build locked standalone eBPF crate
+        working-directory: platform/linux/ebpf/focus-egress-ebpf
+        env:
+          RUSTFLAGS: -C linker=bpf-linker
+        run: |
+          cargo +nightly-2026-08-19 build \
+            -Z build-std=core \
+            --target bpfel-unknown-none \
+            --release \
+            --locked
