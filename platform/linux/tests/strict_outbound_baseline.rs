@@ -1,6 +1,4 @@
-use focus_linux::{
-    FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE, FocusNftablesTransaction,
-};
+use focus_linux::{FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE, FocusNftablesTransaction};
 
 #[test]
 fn strict_outbound_baseline_defaults_to_drop() {
