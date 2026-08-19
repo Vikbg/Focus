@@ -99,10 +99,18 @@ pub enum FocusCgroupError {
 impl fmt::Display for FocusCgroupError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidPid => formatter.write_str("invalid process id for Focus cgroup placement"),
-            Self::PreparationFailed => formatter.write_str("Focus cgroup classes could not be prepared"),
-            Self::PlacementFailed => formatter.write_str("process could not be placed in its Focus cgroup class"),
-            Self::VerificationFailed => formatter.write_str("Focus cgroup process placement could not be verified"),
+            Self::InvalidPid => {
+                formatter.write_str("invalid process id for Focus cgroup placement")
+            }
+            Self::PreparationFailed => {
+                formatter.write_str("Focus cgroup classes could not be prepared")
+            }
+            Self::PlacementFailed => {
+                formatter.write_str("process could not be placed in its Focus cgroup class")
+            }
+            Self::VerificationFailed => {
+                formatter.write_str("Focus cgroup process placement could not be verified")
+            }
         }
     }
 }
