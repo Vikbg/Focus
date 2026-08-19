@@ -70,15 +70,24 @@ fn all_five_classes_are_replaced_attached_and_verified() {
         FocusCgroupClass::System,
         FocusCgroupClass::Blocked,
     ] {
-        assert!(control.events.iter().any(|event| {
-            event.0 == class && event.1 == "replace"
-        }));
-        assert!(control.events.iter().any(|event| {
-            event.0 == class && event.1 == "attach"
-        }));
-        assert!(control.events.iter().any(|event| {
-            event.0 == class && event.1 == "verify"
-        }));
+        assert!(
+            control
+                .events
+                .iter()
+                .any(|event| { event.0 == class && event.1 == "replace" })
+        );
+        assert!(
+            control
+                .events
+                .iter()
+                .any(|event| { event.0 == class && event.1 == "attach" })
+        );
+        assert!(
+            control
+                .events
+                .iter()
+                .any(|event| { event.0 == class && event.1 == "verify" })
+        );
     }
 }
 
@@ -107,7 +116,10 @@ fn one_class_attach_failure_prevents_success() {
         arm_cgroup_egress_programs(&mut control, &policy),
         Err(EgressProgramError::AttachFailed)
     );
-    assert!(!control.events.iter().any(|event| {
-        event.0 == FocusCgroupClass::Vpn && event.1 == "attach"
-    }));
+    assert!(
+        !control
+            .events
+            .iter()
+            .any(|event| { event.0 == FocusCgroupClass::Vpn && event.1 == "attach" })
+    );
 }
