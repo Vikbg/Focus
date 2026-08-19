@@ -6,9 +6,8 @@ use std::{
 };
 
 use crate::{
-    FocusCgroupClass, FocusCgroupControl, FocusCgroupError, ProcfsExecutionFactSource,
-    ProcessLifetime,
-    execution_fact_collector::read_process_lifetime,
+    FocusCgroupClass, FocusCgroupControl, FocusCgroupError, ProcessLifetime,
+    ProcfsExecutionFactSource, execution_fact_collector::read_process_lifetime,
 };
 
 /// Fixed production root for Focus-owned cgroup v2 process classes.
@@ -57,8 +56,8 @@ impl SystemCgroupControl {
             Ok(metadata) => Self::validate_directory_metadata(&metadata),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 fs::create_dir(path).map_err(|_| FocusCgroupError::PreparationFailed)?;
-                let metadata = fs::symlink_metadata(path)
-                    .map_err(|_| FocusCgroupError::PreparationFailed)?;
+                let metadata =
+                    fs::symlink_metadata(path).map_err(|_| FocusCgroupError::PreparationFailed)?;
                 Self::validate_directory_metadata(&metadata)
             }
             Err(_) => Err(FocusCgroupError::PreparationFailed),
@@ -114,8 +113,7 @@ impl SystemCgroupControl {
             .open(path.join(CGROUP_PROCS))
             .map_err(|_| FocusCgroupError::PlacementFailed)?;
         write!(file, "{}", lifetime.pid()).map_err(|_| FocusCgroupError::PlacementFailed)?;
-        file.flush()
-            .map_err(|_| FocusCgroupError::PlacementFailed)
+        file.flush().map_err(|_| FocusCgroupError::PlacementFailed)
     }
 
     fn class_contains(path: &Path, pid: u32) -> Result<bool, FocusCgroupError> {
