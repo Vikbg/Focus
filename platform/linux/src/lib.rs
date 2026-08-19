@@ -2,6 +2,7 @@
 
 mod backend;
 mod cgroup_process_class;
+mod ebpf_egress_policy;
 mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
@@ -28,6 +29,7 @@ pub use cgroup_process_class::{
     FocusCgroupClass, FocusCgroupClassClassifier, FocusCgroupControl, FocusCgroupError,
     place_classified_process,
 };
+pub use ebpf_egress_policy::{EgressProtocol, EgressRuleError, Ipv4EgressRule};
 pub use executable_identity::{
     ExecutableIdentityError, observe_executable, observe_open_executable,
 };
