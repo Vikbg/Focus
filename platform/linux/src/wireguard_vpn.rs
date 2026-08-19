@@ -109,3 +109,82 @@ impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<
         self.command_control.bring_down(&config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::SystemWireGuardCommandControl;
+
+    #[test]
+    fn trusted_wg_quick_executor_requires_root_owned_non_writable_executable_file() {
+        assert!(SystemWireGuardCommandControl::trusted_executor_metadata(
+            true, 0, 0o755
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_executor_metadata(
+            true, 1000, 0o755
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_executor_metadata(
+            true, 0, 0o775
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_executor_metadata(
+            true, 0, 0o644
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_executor_metadata(
+            false, 0, 0o755
+        ));
+    }
+
+    #[test]
+    fn trusted_wireguard_config_is_root_owned_private_regular_and_not_a_symlink() {
+        assert!(SystemWireGuardCommandControl::trusted_config_metadata(
+            true, false, 0, 0o600
+        ));
+        assert!(SystemWireGuardCommandControl::trusted_config_metadata(
+            true, false, 0, 0o400
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_metadata(
+            true, true, 0, 0o600
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_metadata(
+            true, false, 1000, 0o600
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_metadata(
+            true, false, 0, 0o640
+        ));
+        assert!(!SystemWireGuardCommandControl::trusted_config_metadata(
+            false, false, 0, 0o600
+        ));
+    }
+
+    #[test]
+    fn wireguard_config_scope_is_fixed_and_shell_hooks_are_rejected() {
+        assert!(SystemWireGuardCommandControl::config_path_is_in_scope(
+            Path::new("/etc/focus/wireguard/study.conf")
+        ));
+        assert!(!SystemWireGuardCommandControl::config_path_is_in_scope(
+            Path::new("/tmp/study.conf")
+        ));
+        assert!(!SystemWireGuardCommandControl::config_path_is_in_scope(
+            Path::new("/etc/focus/wireguard/nested/study.conf")
+        ));
+        assert!(!SystemWireGuardCommandControl::config_path_is_in_scope(
+            Path::new("/etc/focus/wireguard/study.txt")
+        ));
+
+        assert!(SystemWireGuardCommandControl::safe_config_contents(
+            "[Interface]\nPrivateKey = fixture\nAddress = 10.0.0.2/32\n\n[Peer]\nPublicKey = fixture\nAllowedIPs = 0.0.0.0/0\n"
+        ));
+        for unsafe_config in [
+            "[Interface]\nPostUp = /bin/sh -c whoami\n",
+            "[Interface]\n preup = touch /root/bypass\n",
+            "[Interface]\nPreDown=/bin/false\n",
+            "[Interface]\nPOSTDOWN = /bin/true\n",
+            "[Interface]\nSaveConfig = true\n",
+        ] {
+            assert!(!SystemWireGuardCommandControl::safe_config_contents(
+                unsafe_config
+            ));
+        }
+    }
+}
