@@ -63,5 +63,10 @@ fn production_network_guard_uses_strict_focus_owned_transaction_for_full_lifecyc
     assert_eq!(state.verifications.len(), 2);
     assert_eq!(state.removals, 1);
     assert!(state.replacements[0].contains("policy drop"));
-    assert!(state.verifications.iter().all(|script| script.contains("policy drop")));
+    assert!(
+        state
+            .verifications
+            .iter()
+            .all(|script| script.contains("policy drop"))
+    );
 }
