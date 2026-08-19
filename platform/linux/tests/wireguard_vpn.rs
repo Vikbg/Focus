@@ -85,6 +85,31 @@ fn unknown_wireguard_profile_is_denied_before_executor_trust_is_considered() {
 }
 
 #[test]
+fn duplicate_wireguard_profile_id_is_denied_as_ambiguous() {
+    let first = PathBuf::from("/etc/focus/wireguard/study.conf");
+    let second = PathBuf::from("/etc/focus/wireguard/alternate.conf");
+    let command = RecordingWireGuardCommandControl {
+        trusted_executor: true,
+        trusted_configs: vec![first.clone(), second.clone()],
+        ..RecordingWireGuardCommandControl::default()
+    };
+    let mut control = WireGuardVpnActionControl::new(
+        [
+            WireGuardProfile::new(41, first),
+            WireGuardProfile::new(41, second),
+        ],
+        command,
+    );
+
+    assert_eq!(
+        control.connect_vpn(41),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert!(control.command_control().ups.is_empty());
+    assert!(control.command_control().downs.is_empty());
+}
+
+#[test]
 fn untrusted_wireguard_executor_is_denied_before_command_execution() {
     let config = PathBuf::from("/etc/focus/wireguard/study.conf");
     let command = RecordingWireGuardCommandControl {
