@@ -8,7 +8,9 @@ use std::{
 use aya::{
     Ebpf, EbpfLoader,
     maps::HashMap as AyaHashMap,
-    programs::{CgroupAttachMode, CgroupSkb, CgroupSkbAttachType},
+    programs::{
+        CgroupAttachMode, CgroupSkb, CgroupSkbAttachType, links::LinkType, loaded_links,
+    },
 };
 
 use crate::{
@@ -164,6 +166,19 @@ impl SystemEgressClassProgramControl {
         }
         Ok(())
     }
+
+    fn verify_loaded_cgroup_link(expected_program_id: u32) -> Result<(), EgressProgramError> {
+        for link in loaded_links() {
+            let info = link.map_err(|_| EgressProgramError::VerificationFailed)?;
+            let link_type = info
+                .link_type()
+                .map_err(|_| EgressProgramError::VerificationFailed)?;
+            if link_type == LinkType::Cgroup && info.program_id() == expected_program_id {
+                return Ok(());
+            }
+        }
+        Err(EgressProgramError::VerificationFailed)
+    }
 }
 
 impl EgressClassProgramControl for SystemEgressClassProgramControl {
@@ -232,6 +247,7 @@ impl EgressClassProgramControl for SystemEgressClassProgramControl {
         {
             return Err(EgressProgramError::VerificationFailed);
         }
+        Self::verify_loaded_cgroup_link(expected_program_id)?;
         Self::verify_loaded_rules(&loaded.ebpf, rules)
     }
 }
