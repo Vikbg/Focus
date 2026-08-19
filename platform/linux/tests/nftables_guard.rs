@@ -4,14 +4,19 @@ use focus_linux::{
     FOCUS_NFT_BLOCKED_IPV4_SET, FOCUS_NFT_BLOCKED_IPV6_SET, FOCUS_NFT_FAMILY,
     FOCUS_NFT_OUTPUT_CHAIN, FOCUS_NFT_TABLE, FocusNftablesControl, FocusNftablesError,
     FocusNftablesTransaction, SystemNftablesControl, reload_focus_nftables,
+    remove_focus_nftables,
 };
 
 #[derive(Debug)]
 struct RecordingNftablesControl {
     unrelated_table: String,
-    focus_table: String,
+    focus_table: Option<String>,
     replace_calls: usize,
+    verify_calls: usize,
+    remove_calls: usize,
     fail_replace: bool,
+    fail_verify: bool,
+    fail_remove: bool,
 }
 
 impl FocusNftablesControl for RecordingNftablesControl {
@@ -23,8 +28,41 @@ impl FocusNftablesControl for RecordingNftablesControl {
         if self.fail_replace {
             return Err(FocusNftablesError::ApplyFailed);
         }
-        self.focus_table = transaction.render();
+        self.focus_table = Some(transaction.render());
         Ok(())
+    }
+
+    fn verify_focus_table(
+        &mut self,
+        transaction: &FocusNftablesTransaction,
+    ) -> Result<(), FocusNftablesError> {
+        self.verify_calls += 1;
+        if self.fail_verify || self.focus_table.as_deref() != Some(transaction.render().as_str()) {
+            return Err(FocusNftablesError::VerificationFailed);
+        }
+        Ok(())
+    }
+
+    fn remove_focus_table(&mut self) -> Result<(), FocusNftablesError> {
+        self.remove_calls += 1;
+        if self.fail_remove {
+            return Err(FocusNftablesError::ApplyFailed);
+        }
+        self.focus_table = None;
+        Ok(())
+    }
+}
+
+fn recording_control() -> RecordingNftablesControl {
+    RecordingNftablesControl {
+        unrelated_table: "keep-unrelated-rule".to_owned(),
+        focus_table: Some("old-focus-state".to_owned()),
+        replace_calls: 0,
+        verify_calls: 0,
+        remove_calls: 0,
+        fail_replace: false,
+        fail_verify: false,
+        fail_remove: false,
     }
 }
 
@@ -77,30 +115,22 @@ fn production_control_has_no_caller_selected_table_scope() {
 }
 
 #[test]
-fn focus_reload_preserves_unrelated_firewall_state() {
-    let mut control = RecordingNftablesControl {
-        unrelated_table: "keep-unrelated-rule".to_owned(),
-        focus_table: "old-focus-state".to_owned(),
-        replace_calls: 0,
-        fail_replace: false,
-    };
+fn focus_reload_preserves_unrelated_firewall_state_and_verifies_after_replace() {
+    let mut control = recording_control();
     let transaction = FocusNftablesTransaction::new();
 
     reload_focus_nftables(&mut control, &transaction).unwrap();
 
     assert_eq!(control.unrelated_table, "keep-unrelated-rule");
-    assert_eq!(control.focus_table, transaction.render());
+    assert_eq!(control.focus_table, Some(transaction.render()));
     assert_eq!(control.replace_calls, 1);
+    assert_eq!(control.verify_calls, 1);
 }
 
 #[test]
-fn focus_reload_failure_is_fail_closed() {
-    let mut control = RecordingNftablesControl {
-        unrelated_table: "keep-unrelated-rule".to_owned(),
-        focus_table: "old-focus-state".to_owned(),
-        replace_calls: 0,
-        fail_replace: true,
-    };
+fn focus_reload_apply_failure_is_fail_closed_before_verification() {
+    let mut control = recording_control();
+    control.fail_replace = true;
     let transaction = FocusNftablesTransaction::new();
 
     assert_eq!(
@@ -108,8 +138,51 @@ fn focus_reload_failure_is_fail_closed() {
         Err(FocusNftablesError::ApplyFailed)
     );
     assert_eq!(control.unrelated_table, "keep-unrelated-rule");
-    assert_eq!(control.focus_table, "old-focus-state");
+    assert_eq!(control.focus_table.as_deref(), Some("old-focus-state"));
     assert_eq!(control.replace_calls, 1);
+    assert_eq!(control.verify_calls, 0);
+}
+
+#[test]
+fn focus_reload_verification_failure_is_fail_closed() {
+    let mut control = recording_control();
+    control.fail_verify = true;
+    let transaction = FocusNftablesTransaction::new();
+
+    assert_eq!(
+        reload_focus_nftables(&mut control, &transaction),
+        Err(FocusNftablesError::VerificationFailed)
+    );
+    assert_eq!(control.unrelated_table, "keep-unrelated-rule");
+    assert_eq!(control.focus_table, Some(transaction.render()));
+    assert_eq!(control.replace_calls, 1);
+    assert_eq!(control.verify_calls, 1);
+}
+
+#[test]
+fn focus_remove_is_idempotent_and_preserves_unrelated_firewall_state() {
+    let mut control = recording_control();
+
+    remove_focus_nftables(&mut control).unwrap();
+    remove_focus_nftables(&mut control).unwrap();
+
+    assert_eq!(control.unrelated_table, "keep-unrelated-rule");
+    assert_eq!(control.focus_table, None);
+    assert_eq!(control.remove_calls, 2);
+}
+
+#[test]
+fn focus_remove_failure_is_fail_closed() {
+    let mut control = recording_control();
+    control.fail_remove = true;
+
+    assert_eq!(
+        remove_focus_nftables(&mut control),
+        Err(FocusNftablesError::ApplyFailed)
+    );
+    assert_eq!(control.unrelated_table, "keep-unrelated-rule");
+    assert_eq!(control.focus_table.as_deref(), Some("old-focus-state"));
+    assert_eq!(control.remove_calls, 1);
 }
 
 #[test]
