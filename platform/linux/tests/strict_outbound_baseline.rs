@@ -7,6 +7,14 @@ fn repo_root() -> PathBuf {
 }
 
 #[test]
+fn base_focus_transaction_remains_non_strict() {
+    let script = FocusNftablesTransaction::new().render();
+
+    assert!(script.contains("policy accept"));
+    assert!(!script.contains("policy drop"));
+}
+
+#[test]
 fn strict_outbound_baseline_defaults_to_drop() {
     let transaction = FocusNftablesTransaction::strict_outbound();
     let script = transaction.render();
