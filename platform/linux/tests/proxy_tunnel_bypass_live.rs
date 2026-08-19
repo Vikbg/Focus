@@ -78,7 +78,10 @@ impl TcpFixture {
         F: Fn(TcpStream) + Send + Sync + 'static,
     {
         let listener = loopback_listener();
-        let address = match listener.local_addr().expect("failed to read fixture address") {
+        let address = match listener
+            .local_addr()
+            .expect("failed to read fixture address")
+        {
             SocketAddr::V4(address) => address,
             SocketAddr::V6(_) => panic!("Task 29 fixtures must bind IPv4 loopback"),
         };
@@ -132,9 +135,8 @@ fn start_http_target() -> TcpFixture {
     TcpFixture::start(|mut stream| {
         let mut request = [0_u8; 4096];
         let _ = stream.read(&mut request);
-        let _ = stream.write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-        );
+        let _ = stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
     })
 }
 
@@ -223,10 +225,7 @@ fn start_socks5_proxy(target: SocketAddrV4) -> TcpFixture {
             let _ = client.write_all(&[5, 1, 0, 1, 0, 0, 0, 0, 0, 0]);
             return;
         };
-        if client
-            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0])
-            .is_err()
-        {
+        if client.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).is_err() {
             return;
         }
         relay_bidirectional(client, upstream);
@@ -270,8 +269,7 @@ fn dns_answer(packet: &[u8]) -> Option<Vec<u8>> {
     response.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
     response.extend_from_slice(packet.get(12..question_end)?);
     response.extend_from_slice(&[
-        0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04, 203, 0,
-        113, 53,
+        0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x04, 203, 0, 113, 53,
     ]);
     Some(response)
 }
@@ -280,7 +278,10 @@ impl DnsFixture {
     fn start() -> Self {
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("failed to bind DNS fixture");
-        let address = match socket.local_addr().expect("failed to read DNS fixture address") {
+        let address = match socket
+            .local_addr()
+            .expect("failed to read DNS fixture address")
+        {
             SocketAddr::V4(address) => address,
             SocketAddr::V6(_) => panic!("Task 29 DNS fixture must bind IPv4 loopback"),
         };
@@ -372,8 +373,11 @@ impl SshDynamicFixture {
                 .expect("failed to run ssh-keygen");
             assert!(status.success(), "ssh-keygen failed");
         }
-        fs::copy(client_key.with_extension("pub"), directory.join("authorized_keys"))
-            .expect("failed to create authorized_keys");
+        fs::copy(
+            client_key.with_extension("pub"),
+            directory.join("authorized_keys"),
+        )
+        .expect("failed to create authorized_keys");
 
         let ssh_port = unused_tcp_port();
         let dynamic_port = unused_tcp_port();
