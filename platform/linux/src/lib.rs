@@ -26,6 +26,7 @@ mod rustix_pidfd;
 mod system_cgroup_control;
 mod system_ebpf_class_program;
 mod systemd;
+mod wireguard_vpn;
 
 pub use backend::{LinuxBackend, ProductionLinuxBackend};
 pub use cgroup_process_class::{
@@ -95,6 +96,7 @@ pub use production_privilege_guard::ProductionPrivilegeGuard;
 pub use rustix_pidfd::RustixPidfdOps;
 pub use system_cgroup_control::{FOCUS_CGROUP_ROOT, SystemCgroupControl};
 pub use system_ebpf_class_program::{FOCUS_EBPF_OBJECT_PATH, SystemEgressClassProgramControl};
+pub use wireguard_vpn::{WireGuardCommandControl, WireGuardProfile, WireGuardVpnActionControl};
 
 use std::{
     error::Error,
