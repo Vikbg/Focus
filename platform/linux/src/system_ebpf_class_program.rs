@@ -8,9 +8,7 @@ use std::{
 use aya::{
     Ebpf, EbpfLoader,
     maps::HashMap as AyaHashMap,
-    programs::{
-        CgroupAttachMode, CgroupSkb, CgroupSkbAttachType, links::LinkType, loaded_links,
-    },
+    programs::{CgroupAttachMode, CgroupSkb, CgroupSkbAttachType, links::LinkType, loaded_links},
 };
 
 use crate::{
