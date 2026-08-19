@@ -86,10 +86,12 @@ impl<C> WireGuardVpnActionControl<C> {
     }
 
     fn config_for_id(&self, id: u128) -> Option<PathBuf> {
-        self.profiles
-            .iter()
-            .find(|profile| profile.id == id)
-            .map(|profile| profile.config.clone())
+        let mut matches = self.profiles.iter().filter(|profile| profile.id == id);
+        let profile = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(profile.config.clone())
     }
 }
 
