@@ -252,13 +252,7 @@ impl SystemNftablesControl {
     fn read_focus_table(&self) -> Result<String, FocusNftablesError> {
         let executable = self.trusted_executable()?;
         let output = Command::new(executable)
-            .args([
-                "-y",
-                "list",
-                "table",
-                FOCUS_NFT_FAMILY,
-                FOCUS_NFT_TABLE,
-            ])
+            .args(["-y", "list", "table", FOCUS_NFT_FAMILY, FOCUS_NFT_TABLE])
             .output()
             .map_err(|_| FocusNftablesError::VerificationFailed)?;
         if !output.status.success() {
