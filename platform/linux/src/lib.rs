@@ -1,6 +1,7 @@
 //! Linux-specific Focus enforcement backend.
 
 mod backend;
+mod cgroup_process_class;
 mod executable_identity;
 mod execution_context;
 mod execution_fact_collector;
@@ -22,6 +23,7 @@ mod rustix_pidfd;
 mod systemd;
 
 pub use backend::{LinuxBackend, ProductionLinuxBackend};
+pub use cgroup_process_class::{FocusCgroupClass, FocusCgroupClassClassifier};
 pub use executable_identity::{
     ExecutableIdentityError, observe_executable, observe_open_executable,
 };
