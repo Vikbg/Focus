@@ -1,0 +1,48 @@
+name: eBPF build
+
+on:
+  push:
+    branches:
+      - "main"
+      - "agent/**"
+    paths:
+      - "platform/linux/ebpf/**"
+      - ".github/workflows/ebpf-build.yml"
+  pull_request:
+    paths:
+      - "platform/linux/ebpf/**"
+      - ".github/workflows/ebpf-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ebpf-build-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  task27-ebpf-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust nightly with eBPF sources
+        run: rustup toolchain install nightly --profile minimal --component rust-src
+
+      - name: Install pinned bpf-linker
+        run: cargo install bpf-linker --version 0.11.0 --locked
+
+      - name: Bootstrap and build standalone eBPF crate
+        working-directory: platform/linux/ebpf/focus-egress-ebpf
+        env:
+          RUSTFLAGS: -C linker=bpf-linker
+        run: |
+          cargo +nightly generate-lockfile
+          cat Cargo.lock
+          cargo +nightly build \
+            -Z build-std=core \
+            --target bpfel-unknown-none \
+            --release \
+            --locked
