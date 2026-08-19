@@ -31,8 +31,20 @@ jobs:
       - name: Install Rust nightly with eBPF sources
         run: rustup toolchain install nightly --profile minimal --component rust-src
 
-      - name: Install pinned bpf-linker
-        run: cargo install bpf-linker --version 0.11.0 --locked
+      - name: Install pinned bpf-linker release
+        run: |
+          curl \
+            --fail \
+            --location \
+            --proto '=https' \
+            --tlsv1.2 \
+            --output /tmp/bpf-linker.tar.zst \
+            https://github.com/aya-rs/bpf-linker/releases/download/v0.11.0/bpf-linker-x86_64-unknown-linux-musl.tar.zst
+          sha256sum /tmp/bpf-linker.tar.zst
+          mkdir -p "$HOME/.local/bin"
+          tar -xpf /tmp/bpf-linker.tar.zst -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/bpf-linker" --version
 
       - name: Bootstrap and build standalone eBPF crate
         working-directory: platform/linux/ebpf/focus-egress-ebpf
