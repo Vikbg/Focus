@@ -2,6 +2,7 @@
 
 mod backend;
 mod cgroup_process_class;
+mod dns_policy;
 mod ebpf_class_program;
 mod ebpf_egress_policy;
 mod executable_identity;
@@ -31,6 +32,7 @@ pub use cgroup_process_class::{
     FocusCgroupClass, FocusCgroupClassClassifier, FocusCgroupControl, FocusCgroupError,
     place_classified_process,
 };
+pub use dns_policy::{DnsPolicyState, DnsResolutionEntry};
 pub use ebpf_class_program::{
     CgroupEgressPolicy, EgressClassProgramControl, EgressProgramError, arm_cgroup_egress_programs,
 };
