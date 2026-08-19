@@ -45,7 +45,9 @@ pub use fanotify_execution_channel::{
 pub use linux_process_control::{
     LinuxProcessControl, LinuxProcessHandle, LinuxProcessInventorySource, ProcessHandleOps,
 };
-pub use network_guard::{NetworkGuardControl, NetworkGuardError, ProductionNetworkGuard};
+pub use network_guard::{
+    FailClosedNetworkGuard, NetworkGuardControl, NetworkGuardError, ProductionNetworkGuard,
+};
 pub use nftables_guard::{
     FOCUS_NFT_BLOCKED_IPV4_SET, FOCUS_NFT_BLOCKED_IPV6_SET, FOCUS_NFT_FAMILY,
     FOCUS_NFT_OUTPUT_CHAIN, FOCUS_NFT_TABLE, FocusNftablesCommand, FocusNftablesControl,
