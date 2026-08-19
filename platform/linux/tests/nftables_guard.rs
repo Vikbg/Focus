@@ -1,3 +1,5 @@
+use std::{fs, path::PathBuf};
+
 use focus_linux::{
     FOCUS_NFT_BLOCKED_IPV4_SET, FOCUS_NFT_BLOCKED_IPV6_SET, FOCUS_NFT_FAMILY,
     FOCUS_NFT_OUTPUT_CHAIN, FOCUS_NFT_TABLE, FocusNftablesControl, FocusNftablesError,
@@ -24,6 +26,10 @@ impl FocusNftablesControl for RecordingNftablesControl {
         self.focus_table = transaction.render();
         Ok(())
     }
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 #[test]
@@ -104,4 +110,36 @@ fn focus_reload_failure_is_fail_closed() {
     assert_eq!(control.unrelated_table, "keep-unrelated-rule");
     assert_eq!(control.focus_table, "old-focus-state");
     assert_eq!(control.replace_calls, 1);
+}
+
+#[test]
+fn task24_requires_real_nftables_live_gate() {
+    let root = repo_root();
+    let live = fs::read_to_string(root.join("platform/linux/tests/nftables_live.rs"))
+        .expect("Task 24 nftables live test file is missing");
+    let workflow = fs::read_to_string(root.join(".github/workflows/nftables-live.yml"))
+        .expect("Task 24 nftables live CI workflow is missing");
+
+    for marker in [
+        "focus_reload_preserves_real_unrelated_table_and_replaces_stale_focus_state",
+        "unrelated_fixture",
+        "stale_focus_fixture",
+        "SystemNftablesControl::default()",
+        "reload_focus_nftables",
+        "--ignored",
+    ] {
+        assert!(live.contains(marker), "nftables live test is missing {marker}");
+    }
+
+    for marker in [
+        "name: Nftables live",
+        "runs-on: ubuntu-24.04",
+        "systemd-detect-virt --vm",
+        "sudo apt-get install --yes nftables",
+        "--test nftables_live",
+        "--ignored",
+        "--nocapture",
+    ] {
+        assert!(workflow.contains(marker), "nftables live workflow is missing {marker}");
+    }
 }
