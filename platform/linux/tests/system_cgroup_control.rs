@@ -63,7 +63,10 @@ fn task26_requires_real_cgroup_v2_live_gate() {
         "FOCUS_VM_SCENARIO",
         "cgroup-classes-live",
     ] {
-        assert!(live.contains(marker), "cgroup live test is missing {marker}");
+        assert!(
+            live.contains(marker),
+            "cgroup live test is missing {marker}"
+        );
     }
 
     for marker in [
@@ -75,6 +78,9 @@ fn task26_requires_real_cgroup_v2_live_gate() {
         "--ignored",
         "--nocapture",
     ] {
-        assert!(workflow.contains(marker), "cgroup live workflow is missing {marker}");
+        assert!(
+            workflow.contains(marker),
+            "cgroup live workflow is missing {marker}"
+        );
     }
 }
