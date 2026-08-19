@@ -23,6 +23,7 @@ mod process_guard;
 mod production_privilege_guard;
 mod rustix_pidfd;
 mod system_cgroup_control;
+mod system_ebpf_class_program;
 mod systemd;
 
 pub use backend::{LinuxBackend, ProductionLinuxBackend};
@@ -91,6 +92,7 @@ pub use process_guard::{
 pub use production_privilege_guard::ProductionPrivilegeGuard;
 pub use rustix_pidfd::RustixPidfdOps;
 pub use system_cgroup_control::{FOCUS_CGROUP_ROOT, SystemCgroupControl};
+pub use system_ebpf_class_program::{FOCUS_EBPF_OBJECT_PATH, SystemEgressClassProgramControl};
 
 use std::{
     error::Error,
