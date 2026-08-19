@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::{PrivilegeBrokerError, VpnActionControl};
+use crate::{PrivilegeBrokerError, VpnActionControl, VpnAdapter};
 
 const FOCUS_CONFIG_ROOT: &str = "/etc/focus";
 const FOCUS_WIREGUARD_CONFIG_ROOT: &str = "/etc/focus/wireguard";
@@ -59,7 +59,7 @@ pub trait WireGuardCommandControl {
     fn bring_down(&mut self, config: &Path) -> Result<(), PrivilegeBrokerError>;
 }
 
-/// Provider-specific `WireGuard` implementation of the provider-neutral VPN action contract.
+/// Provider-specific `WireGuard` implementation of the provider-neutral VPN adapter contract.
 #[derive(Debug)]
 pub struct WireGuardVpnActionControl<C> {
     profiles: Vec<WireGuardProfile>,
@@ -93,8 +93,8 @@ impl<C> WireGuardVpnActionControl<C> {
     }
 }
 
-impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<C> {
-    fn connect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+impl<C: WireGuardCommandControl> VpnAdapter for WireGuardVpnActionControl<C> {
+    fn connect(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
         let config = self
             .config_for_id(id)
             .ok_or(PrivilegeBrokerError::ActionNotApproved)?;
@@ -107,7 +107,7 @@ impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<
         self.command_control.bring_up(&config)
     }
 
-    fn disconnect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+    fn disconnect(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
         let config = self
             .config_for_id(id)
             .ok_or(PrivilegeBrokerError::ActionNotApproved)?;
@@ -118,6 +118,16 @@ impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<
             return Err(PrivilegeBrokerError::ActionNotApproved);
         }
         self.command_control.bring_down(&config)
+    }
+}
+
+impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<C> {
+    fn connect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+        VpnAdapter::connect(self, id)
+    }
+
+    fn disconnect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+        VpnAdapter::disconnect(self, id)
     }
 }
 
