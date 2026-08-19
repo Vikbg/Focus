@@ -1,9 +1,6 @@
 use std::{error::Error, fmt};
 
-use crate::{
-    cgroup_process_class::FocusCgroupClass,
-    ebpf_egress_policy::Ipv4EgressRule,
-};
+use crate::{cgroup_process_class::FocusCgroupClass, ebpf_egress_policy::Ipv4EgressRule};
 
 /// Complete exact egress policy for the fixed Focus cgroup classes.
 ///
