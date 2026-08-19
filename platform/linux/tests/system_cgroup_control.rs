@@ -9,7 +9,7 @@ fn repo_source() -> String {
 
 #[test]
 fn production_cgroup_control_uses_only_the_fixed_focus_root() {
-    let control = SystemCgroupControl::default();
+    let control = SystemCgroupControl;
 
     assert_eq!(FOCUS_CGROUP_ROOT, "/sys/fs/cgroup/focus");
     assert_eq!(control.root(), Path::new(FOCUS_CGROUP_ROOT));
