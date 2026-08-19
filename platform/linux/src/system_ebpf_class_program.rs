@@ -91,8 +91,7 @@ impl SystemEgressClassProgramControl {
 
     fn open_safe_class_cgroup(class: FocusCgroupClass) -> Result<File, EgressProgramError> {
         let path = Path::new(FOCUS_CGROUP_ROOT).join(class.as_str());
-        let metadata =
-            fs::symlink_metadata(&path).map_err(|_| EgressProgramError::AttachFailed)?;
+        let metadata = fs::symlink_metadata(&path).map_err(|_| EgressProgramError::AttachFailed)?;
         let mode = metadata.mode() & 0o777;
         if !metadata.file_type().is_dir()
             || metadata.uid() != 0
@@ -104,11 +103,7 @@ impl SystemEgressClassProgramControl {
     }
 
     fn expected_keys(rules: &[Ipv4EgressRule]) -> BTreeSet<u64> {
-        rules
-            .iter()
-            .copied()
-            .map(Ipv4EgressRule::map_key)
-            .collect()
+        rules.iter().copied().map(Ipv4EgressRule::map_key).collect()
     }
 
     fn replace_loaded_rules(
