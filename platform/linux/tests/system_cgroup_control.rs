@@ -1,8 +1,6 @@
 use std::{fs, path::Path};
 
-use focus_linux::{
-    FOCUS_CGROUP_ROOT, FocusCgroupClass, FocusCgroupControl, SystemCgroupControl,
-};
+use focus_linux::{FOCUS_CGROUP_ROOT, FocusCgroupClass, FocusCgroupControl, SystemCgroupControl};
 
 fn repo_source() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/system_cgroup_control.rs");
