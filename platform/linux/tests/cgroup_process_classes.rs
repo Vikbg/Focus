@@ -45,8 +45,7 @@ fn child_of_trusted_compiler_enters_development_class() {
         Vec::new(),
         Vec::new(),
     );
-    let compiler =
-        ObservedExecutable::new("/usr/bin/clang").with_digest(compiler_digest);
+    let compiler = ObservedExecutable::new("/usr/bin/clang").with_digest(compiler_digest);
     let compiled_child = stable_executable("/workspace/target/app", 0x23).with_parent(compiler);
 
     assert_eq!(
@@ -70,9 +69,7 @@ fn unknown_or_ambiguous_identity_fails_closed_to_blocked_class() {
         FocusCgroupClass::Blocked
     );
     assert_eq!(
-        classifier.classify(
-            &ObservedExecutable::new("/opt/ambiguous").with_digest(shared_digest)
-        ),
+        classifier.classify(&ObservedExecutable::new("/opt/ambiguous").with_digest(shared_digest)),
         FocusCgroupClass::Blocked
     );
 }
