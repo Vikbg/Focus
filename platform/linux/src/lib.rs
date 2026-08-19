@@ -2,6 +2,7 @@
 
 mod backend;
 mod cgroup_process_class;
+mod ebpf_class_program;
 mod ebpf_egress_policy;
 mod executable_identity;
 mod execution_context;
@@ -28,6 +29,9 @@ pub use backend::{LinuxBackend, ProductionLinuxBackend};
 pub use cgroup_process_class::{
     FocusCgroupClass, FocusCgroupClassClassifier, FocusCgroupControl, FocusCgroupError,
     place_classified_process,
+};
+pub use ebpf_class_program::{
+    CgroupEgressPolicy, EgressClassProgramControl, EgressProgramError, arm_cgroup_egress_programs,
 };
 pub use ebpf_egress_policy::{
     EgressAllowMap, EgressMapError, EgressProtocol, EgressRuleError, Ipv4EgressRule,
