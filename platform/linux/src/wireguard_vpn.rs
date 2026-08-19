@@ -2,6 +2,10 @@ use std::path::{Path, PathBuf};
 
 use crate::{PrivilegeBrokerError, VpnActionControl};
 
+const FOCUS_WIREGUARD_CONFIG_ROOT: &str = "/etc/focus/wireguard";
+const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
+const CONFIG_VISIBLE_TO_NON_OWNER: u32 = 0o077;
+
 /// One pre-approved `WireGuard` profile bound to a stable Focus VPN id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireGuardProfile {
@@ -107,6 +111,50 @@ impl<C: WireGuardCommandControl> VpnActionControl for WireGuardVpnActionControl<
             return Err(PrivilegeBrokerError::ActionNotApproved);
         }
         self.command_control.bring_down(&config)
+    }
+}
+
+/// Production boundary for a fixed `wg-quick` executable and Focus-owned configuration scope.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SystemWireGuardCommandControl;
+
+impl SystemWireGuardCommandControl {
+    fn trusted_executor_metadata(is_file: bool, owner_uid: u32, mode: u32) -> bool {
+        is_file && owner_uid == 0 && mode & 0o111 != 0 && mode & WRITEABLE_BY_NON_OWNER == 0
+    }
+
+    fn trusted_config_metadata(
+        is_file: bool,
+        is_symlink: bool,
+        owner_uid: u32,
+        mode: u32,
+    ) -> bool {
+        is_file
+            && !is_symlink
+            && owner_uid == 0
+            && mode & CONFIG_VISIBLE_TO_NON_OWNER == 0
+            && mode & 0o400 != 0
+    }
+
+    fn config_path_is_in_scope(path: &Path) -> bool {
+        path.parent() == Some(Path::new(FOCUS_WIREGUARD_CONFIG_ROOT))
+            && path.extension().and_then(|extension| extension.to_str()) == Some("conf")
+    }
+
+    fn safe_config_contents(contents: &str) -> bool {
+        contents.lines().all(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[') {
+                return true;
+            }
+            let Some((key, _value)) = trimmed.split_once('=') else {
+                return true;
+            };
+            !matches!(
+                key.trim().to_ascii_lowercase().as_str(),
+                "preup" | "postup" | "predown" | "postdown" | "saveconfig"
+            )
+        })
     }
 }
 
