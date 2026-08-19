@@ -1,0 +1,74 @@
+name: Strict outbound live
+
+on:
+  push:
+    branches:
+      - "main"
+      - "agent/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/focus-platform/**"
+      - "platform/linux/**"
+      - ".github/workflows/strict-outbound-live.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/focus-platform/**"
+      - "platform/linux/**"
+      - ".github/workflows/strict-outbound-live.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strict-outbound-live-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  task25-strict-outbound-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify disposable VM runner
+        run: systemd-detect-virt --vm
+
+      - name: Ensure traffic fixtures are available
+        run: |
+          if ! command -v nft >/dev/null 2>&1 || \
+             ! command -v curl >/dev/null 2>&1 || \
+             ! command -v wget >/dev/null 2>&1 || \
+             ! command -v nc >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes nftables curl wget netcat-openbsd
+          fi
+          nft --version
+          curl --version
+          wget --version
+          nc -h 2>&1 | head -n 1
+
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Run Task 25 strict outbound live gate
+        run: |
+          sudo env \
+            "PATH=$PATH" \
+            "RUSTUP_HOME=$HOME/.rustup" \
+            "CARGO_HOME=$HOME/.cargo" \
+            FOCUS_VM_SCENARIO=strict-outbound-live \
+            cargo test \
+              --locked \
+              -p focus-linux \
+              --test strict_outbound_live \
+              -- \
+              --ignored \
+              --nocapture

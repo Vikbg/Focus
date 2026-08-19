@@ -90,13 +90,28 @@ pub struct FocusNftablesCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusNftablesCommandKind {
-    DesiredTable,
+    DesiredTable(FocusOutputPolicy),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusOutputPolicy {
+    Accept,
+    Drop,
+}
+
+impl FocusOutputPolicy {
+    const fn as_nft(self) -> &'static str {
+        match self {
+            Self::Accept => "accept",
+            Self::Drop => "drop",
+        }
+    }
 }
 
 impl FocusNftablesCommand {
-    const fn desired_table() -> Self {
+    const fn desired_table(policy: FocusOutputPolicy) -> Self {
         Self {
-            kind: FocusNftablesCommandKind::DesiredTable,
+            kind: FocusNftablesCommandKind::DesiredTable(policy),
         }
     }
 
@@ -114,19 +129,22 @@ impl FocusNftablesCommand {
 
     fn render(self) -> String {
         match self.kind {
-            FocusNftablesCommandKind::DesiredTable => format!(
-                "table {FOCUS_NFT_FAMILY} {FOCUS_NFT_TABLE} {{\n\
-                 \tset {FOCUS_NFT_BLOCKED_IPV4_SET} {{\n\
-                 \t\ttype ipv4_addr\n\
-                 \t}}\n\
-                 \tset {FOCUS_NFT_BLOCKED_IPV6_SET} {{\n\
-                 \t\ttype ipv6_addr\n\
-                 \t}}\n\
-                 \tchain {FOCUS_NFT_OUTPUT_CHAIN} {{\n\
-                 \t\ttype filter hook output priority 0; policy accept;\n\
-                 \t}}\n\
-                 }}"
-            ),
+            FocusNftablesCommandKind::DesiredTable(policy) => {
+                let output_policy = policy.as_nft();
+                format!(
+                    "table {FOCUS_NFT_FAMILY} {FOCUS_NFT_TABLE} {{\n\
+                     \tset {FOCUS_NFT_BLOCKED_IPV4_SET} {{\n\
+                     \t\ttype ipv4_addr\n\
+                     \t}}\n\
+                     \tset {FOCUS_NFT_BLOCKED_IPV6_SET} {{\n\
+                     \t\ttype ipv6_addr\n\
+                     \t}}\n\
+                     \tchain {FOCUS_NFT_OUTPUT_CHAIN} {{\n\
+                     \t\ttype filter hook output priority 0; policy {output_policy};\n\
+                     \t}}\n\
+                     }}"
+                )
+            }
         }
     }
 }
@@ -138,11 +156,21 @@ pub struct FocusNftablesTransaction {
 }
 
 impl FocusNftablesTransaction {
-    /// Creates the minimal Focus-owned nftables transaction.
+    /// Creates the non-strict Focus-owned nftables transaction used as the base table state.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            commands: vec![FocusNftablesCommand::desired_table()],
+            commands: vec![FocusNftablesCommand::desired_table(
+                FocusOutputPolicy::Accept,
+            )],
+        }
+    }
+
+    /// Creates the strict outbound baseline used while a strict session is protected.
+    #[must_use]
+    pub fn strict_outbound() -> Self {
+        Self {
+            commands: vec![FocusNftablesCommand::desired_table(FocusOutputPolicy::Drop)],
         }
     }
 
