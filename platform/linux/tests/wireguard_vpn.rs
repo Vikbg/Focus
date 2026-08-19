@@ -64,3 +64,59 @@ fn approved_wireguard_profile_disconnects_exact_registered_config() {
     assert_eq!(control.command_control().downs, vec![config]);
     assert!(control.command_control().ups.is_empty());
 }
+
+#[test]
+fn unknown_wireguard_profile_is_denied_before_executor_trust_is_considered() {
+    let config = PathBuf::from("/etc/focus/wireguard/study.conf");
+    let command = RecordingWireGuardCommandControl {
+        trusted_executor: false,
+        trusted_configs: vec![config.clone()],
+        ..RecordingWireGuardCommandControl::default()
+    };
+    let profile = WireGuardProfile::new(41, config);
+    let mut control = WireGuardVpnActionControl::new([profile], command);
+
+    assert_eq!(
+        control.connect_vpn(99),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert!(control.command_control().ups.is_empty());
+    assert!(control.command_control().downs.is_empty());
+}
+
+#[test]
+fn untrusted_wireguard_executor_is_denied_before_command_execution() {
+    let config = PathBuf::from("/etc/focus/wireguard/study.conf");
+    let command = RecordingWireGuardCommandControl {
+        trusted_executor: false,
+        trusted_configs: vec![config.clone()],
+        ..RecordingWireGuardCommandControl::default()
+    };
+    let profile = WireGuardProfile::new(41, config);
+    let mut control = WireGuardVpnActionControl::new([profile], command);
+
+    assert_eq!(
+        control.connect_vpn(41),
+        Err(PrivilegeBrokerError::UnsafeExecutor)
+    );
+    assert!(control.command_control().ups.is_empty());
+    assert!(control.command_control().downs.is_empty());
+}
+
+#[test]
+fn untrusted_wireguard_config_is_denied_before_command_execution() {
+    let config = PathBuf::from("/etc/focus/wireguard/study.conf");
+    let command = RecordingWireGuardCommandControl {
+        trusted_executor: true,
+        ..RecordingWireGuardCommandControl::default()
+    };
+    let profile = WireGuardProfile::new(41, config);
+    let mut control = WireGuardVpnActionControl::new([profile], command);
+
+    assert_eq!(
+        control.connect_vpn(41),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert!(control.command_control().ups.is_empty());
+    assert!(control.command_control().downs.is_empty());
+}
