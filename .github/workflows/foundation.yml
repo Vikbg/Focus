@@ -48,22 +48,6 @@ jobs:
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
 
-      - name: Temporary emit refreshed Cargo lockfile
-        run: |
-          cargo generate-lockfile
-          echo "FOCUS_LOCK_B64_BEGIN"
-          base64 -w0 Cargo.lock
-          echo
-          echo "FOCUS_LOCK_B64_END"
-
-      - name: Temporary upload refreshed Cargo lockfile
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: generated-cargo-lock
-          path: Cargo.lock
-          if-no-files-found: error
-          retention-days: 1
-
       - name: Check Rust workspace
         run: cargo check --workspace --all-targets --locked
 
