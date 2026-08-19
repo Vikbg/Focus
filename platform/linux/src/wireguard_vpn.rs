@@ -7,6 +7,7 @@ use std::{
 
 use crate::{PrivilegeBrokerError, VpnActionControl};
 
+const FOCUS_CONFIG_ROOT: &str = "/etc/focus";
 const FOCUS_WIREGUARD_CONFIG_ROOT: &str = "/etc/focus/wireguard";
 const WG_QUICK_CANDIDATES: [&str; 2] = ["/usr/bin/wg-quick", "/usr/sbin/wg-quick"];
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
@@ -190,15 +191,24 @@ impl SystemWireGuardCommandControl {
         ))
     }
 
-    fn config_root_is_trusted() -> Result<bool, PrivilegeBrokerError> {
-        let metadata = fs::symlink_metadata(FOCUS_WIREGUARD_CONFIG_ROOT)
-            .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+    fn trusted_config_root(path: &Path) -> Result<bool, PrivilegeBrokerError> {
+        let metadata =
+            fs::symlink_metadata(path).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
         Ok(Self::trusted_config_root_metadata(
             metadata.is_dir(),
             metadata.file_type().is_symlink(),
             metadata.uid(),
             metadata.permissions().mode() & 0o777,
         ))
+    }
+
+    fn config_roots_are_trusted() -> Result<bool, PrivilegeBrokerError> {
+        for root in [FOCUS_CONFIG_ROOT, FOCUS_WIREGUARD_CONFIG_ROOT] {
+            if !Self::trusted_config_root(Path::new(root))? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn run_action(&self, action: &str, config: &Path) -> Result<(), PrivilegeBrokerError> {
@@ -237,7 +247,7 @@ impl WireGuardCommandControl for SystemWireGuardCommandControl {
     }
 
     fn config_is_trusted(&self, config: &Path) -> Result<bool, PrivilegeBrokerError> {
-        if !Self::config_path_is_in_scope(config) || !Self::config_root_is_trusted()? {
+        if !Self::config_path_is_in_scope(config) || !Self::config_roots_are_trusted()? {
             return Ok(false);
         }
 
