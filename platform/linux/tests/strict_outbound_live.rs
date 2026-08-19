@@ -49,7 +49,10 @@ impl LocalHttpServer {
     fn start() -> Self {
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("failed to bind local HTTP fixture");
-        let address = match listener.local_addr().expect("failed to read fixture address") {
+        let address = match listener
+            .local_addr()
+            .expect("failed to read fixture address")
+        {
             std::net::SocketAddr::V4(address) => address,
             std::net::SocketAddr::V6(_) => panic!("Task 25 fixture must bind IPv4 loopback"),
         };
@@ -147,8 +150,14 @@ fn assert_all_paths_reachable(server: &LocalHttpServer) {
 fn assert_all_paths_blocked(server: &LocalHttpServer) {
     let url = server.url();
     let port = server.port();
-    assert!(!curl_succeeds(&url), "curl bypassed strict outbound baseline");
-    assert!(!wget_succeeds(&url), "wget bypassed strict outbound baseline");
+    assert!(
+        !curl_succeeds(&url),
+        "curl bypassed strict outbound baseline"
+    );
+    assert!(
+        !wget_succeeds(&url),
+        "wget bypassed strict outbound baseline"
+    );
     assert!(!nc_succeeds(&port), "nc bypassed strict outbound baseline");
 }
 
