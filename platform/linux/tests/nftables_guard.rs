@@ -198,6 +198,8 @@ fn task24_requires_real_nftables_live_gate() {
         "stale_focus_fixture",
         "SystemNftablesControl::default()",
         "reload_focus_nftables",
+        "verify_focus_table",
+        "remove_focus_nftables",
     ] {
         assert!(
             live.contains(marker),
