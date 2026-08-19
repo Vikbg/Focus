@@ -24,6 +24,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: nftables-live-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   task24-nftables-live:
     runs-on: ubuntu-24.04
@@ -35,10 +39,13 @@ jobs:
       - name: Verify disposable VM runner
         run: systemd-detect-virt --vm
 
-      - name: Install nftables
+      - name: Ensure nftables is available
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes nftables
+          if ! command -v nft >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes nftables
+          fi
+          nft --version
 
       - name: Install Rust stable
         run: |
