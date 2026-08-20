@@ -360,4 +360,109 @@ mod tests {
             Path::new("/tmp/study.ovpn")
         ));
     }
+
+    #[test]
+    fn openvpn_config_accepts_client_profile_with_inline_credentials() {
+        let config = r#"
+client
+dev tun
+proto udp
+remote vpn.example 1194
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+<ca>
+-----BEGIN CERTIFICATE-----
+inline-ca
+-----END CERTIFICATE-----
+</ca>
+<cert>
+-----BEGIN CERTIFICATE-----
+inline-cert
+-----END CERTIFICATE-----
+</cert>
+<key>
+-----BEGIN PRIVATE KEY-----
+inline-key
+-----END PRIVATE KEY-----
+</key>
+<tls-crypt>
+inline-tls-crypt
+</tls-crypt>
+<auth-user-pass>
+study-user
+study-password
+</auth-user-pass>
+"#;
+
+        assert!(SystemOpenVpnCommandControl::safe_config_contents(config));
+    }
+
+    #[test]
+    fn openvpn_config_rejects_privileged_execution_control_and_external_file_directives() {
+        for directive in [
+            "up /tmp/hook",
+            "down /tmp/hook",
+            "route-up /tmp/hook",
+            "route-pre-down /tmp/hook",
+            "ipchange /tmp/hook",
+            "tls-verify /tmp/hook",
+            "auth-user-pass-verify /tmp/hook via-file",
+            "client-connect /tmp/hook",
+            "client-disconnect /tmp/hook",
+            "learn-address /tmp/hook",
+            "tls-crypt-v2-verify /tmp/hook",
+            "script-security 3",
+            "plugin /tmp/plugin.so",
+            "management 127.0.0.1 7505",
+            "management-query-remote",
+            "daemon",
+            "writepid /tmp/openvpn.pid",
+            "config /tmp/other.conf",
+            "cd /tmp",
+            "chroot /tmp/root",
+            "tmp-dir /tmp",
+            "ca /tmp/ca.crt",
+            "cert /tmp/client.crt",
+            "key /tmp/client.key",
+            "pkcs12 /tmp/client.p12",
+            "secret /tmp/static.key",
+            "crl-verify /tmp/crl.pem",
+            "extra-certs /tmp/chain.pem",
+            "tls-auth /tmp/ta.key 1",
+            "tls-crypt /tmp/tc.key",
+            "tls-crypt-v2 /tmp/tcv2.key",
+            "auth-user-pass /tmp/credentials",
+            "askpass /tmp/passphrase",
+            "http-proxy-user-pass /tmp/proxy-creds",
+            "auth-gen-token-secret /tmp/token-secret",
+            "log /tmp/openvpn.log",
+            "log-append /tmp/openvpn.log",
+            "status /tmp/openvpn.status",
+            "tls-export-cert /tmp/certs",
+            "server 10.8.0.0 255.255.255.0",
+            "server-bridge 10.8.0.4 255.255.255.0 10.8.0.50 10.8.0.100",
+            "mode server",
+            "--UP /tmp/hook",
+        ] {
+            assert!(
+                !SystemOpenVpnCommandControl::safe_config_contents(directive),
+                "dangerous OpenVPN directive was accepted: {directive}"
+            );
+        }
+    }
+
+    #[test]
+    fn openvpn_config_rejects_unknown_mismatched_or_unterminated_inline_blocks() {
+        for config in [
+            "<unknown>\nvalue\n</unknown>",
+            "<ca>\nvalue\n</cert>",
+            "<key>\nvalue",
+            "</ca>",
+            "<ca>\n<key>\nvalue\n</key>\n</ca>",
+        ] {
+            assert!(!SystemOpenVpnCommandControl::safe_config_contents(config));
+        }
+    }
 }
