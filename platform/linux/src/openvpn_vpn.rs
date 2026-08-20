@@ -183,12 +183,7 @@ impl SystemOpenVpnCommandControl {
         is_dir && !is_symlink && owner_uid == 0 && mode & WRITEABLE_BY_NON_OWNER == 0
     }
 
-    fn trusted_config_metadata(
-        is_file: bool,
-        is_symlink: bool,
-        owner_uid: u32,
-        mode: u32,
-    ) -> bool {
+    fn trusted_config_metadata(is_file: bool, is_symlink: bool, owner_uid: u32, mode: u32) -> bool {
         is_file
             && !is_symlink
             && owner_uid == 0
@@ -198,13 +193,16 @@ impl SystemOpenVpnCommandControl {
 
     fn config_path_is_in_scope(config: &Path) -> bool {
         config.parent() == Some(Path::new(FOCUS_OPENVPN_CONFIG_ROOT))
-            && matches!(config.extension().and_then(|extension| extension.to_str()), Some("ovpn" | "conf"))
+            && matches!(
+                config.extension().and_then(|extension| extension.to_str()),
+                Some("ovpn" | "conf")
+            )
     }
 
     fn config_roots_are_trusted() -> Result<bool, PrivilegeBrokerError> {
         for root in [FOCUS_CONFIG_ROOT, FOCUS_OPENVPN_CONFIG_ROOT] {
-            let metadata = fs::symlink_metadata(root)
-                .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+            let metadata =
+                fs::symlink_metadata(root).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
             if !Self::trusted_config_root_metadata(
                 metadata.is_dir(),
                 metadata.file_type().is_symlink(),
@@ -241,8 +239,8 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
             return Ok(false);
         }
 
-        let metadata = fs::symlink_metadata(config)
-            .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        let metadata =
+            fs::symlink_metadata(config).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
         Ok(Self::trusted_config_metadata(
             metadata.is_file(),
             metadata.file_type().is_symlink(),
@@ -346,20 +344,20 @@ mod tests {
 
     #[test]
     fn openvpn_config_scope_allows_only_direct_ovpn_or_conf_children() {
-        assert!(SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
-            "/etc/focus/openvpn/study.ovpn"
-        )));
-        assert!(SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
-            "/etc/focus/openvpn/study.conf"
-        )));
-        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
-            "/etc/focus/openvpn/nested/study.ovpn"
-        )));
-        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
-            "/etc/focus/openvpn/study.txt"
-        )));
-        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
-            "/tmp/study.ovpn"
-        )));
+        assert!(SystemOpenVpnCommandControl::config_path_is_in_scope(
+            Path::new("/etc/focus/openvpn/study.ovpn")
+        ));
+        assert!(SystemOpenVpnCommandControl::config_path_is_in_scope(
+            Path::new("/etc/focus/openvpn/study.conf")
+        ));
+        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(
+            Path::new("/etc/focus/openvpn/nested/study.ovpn")
+        ));
+        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(
+            Path::new("/etc/focus/openvpn/study.txt")
+        ));
+        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(
+            Path::new("/tmp/study.ovpn")
+        ));
     }
 }
