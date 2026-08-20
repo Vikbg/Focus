@@ -101,8 +101,10 @@ impl<C: OpenVpnCommandControl> VpnAdapter for OpenVpnAdapter<C> {
             .start_service(&Self::unit_for_id(id), &config)
     }
 
-    fn disconnect(&mut self, _id: u128) -> Result<(), PrivilegeBrokerError> {
-        Err(PrivilegeBrokerError::ActionNotApproved)
+    fn disconnect(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
+        self.config_for_id(id)
+            .ok_or(PrivilegeBrokerError::ActionNotApproved)?;
+        self.command_control.stop_service(&Self::unit_for_id(id))
     }
 }
 
