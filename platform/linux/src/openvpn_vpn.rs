@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{PrivilegeBrokerError, VpnActionControl, VpnAdapter};
 
-/// One pre-approved OpenVPN profile bound to a stable Focus VPN id.
+/// One pre-approved `OpenVPN` profile bound to a stable Focus VPN id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenVpnProfile {
     id: u128,
@@ -10,14 +10,14 @@ pub struct OpenVpnProfile {
 }
 
 impl OpenVpnProfile {
-    /// Creates one pre-approved OpenVPN profile registration.
+    /// Creates one pre-approved `OpenVPN` profile registration.
     #[must_use]
     pub fn new(id: u128, config: PathBuf) -> Self {
         Self { id, config }
     }
 }
 
-/// Narrow command dependency used by the OpenVPN adapter.
+/// Narrow command dependency used by the `OpenVPN` adapter.
 pub trait OpenVpnCommandControl {
     /// Returns whether the fixed production executor is trusted.
     ///
@@ -33,14 +33,14 @@ pub trait OpenVpnCommandControl {
     /// Returns an error when configuration trust cannot be established safely.
     fn config_is_trusted(&self, config: &Path) -> Result<bool, PrivilegeBrokerError>;
 
-    /// Starts one approved OpenVPN profile under a deterministic Focus-owned systemd unit.
+    /// Starts one approved `OpenVPN` profile under a deterministic Focus-owned systemd unit.
     ///
     /// # Errors
     ///
     /// Returns an error when the service cannot be started.
     fn start_service(&mut self, unit: &str, config: &Path) -> Result<(), PrivilegeBrokerError>;
 
-    /// Stops one deterministic Focus-owned OpenVPN systemd unit.
+    /// Stops one deterministic Focus-owned `OpenVPN` systemd unit.
     ///
     /// # Errors
     ///
@@ -48,7 +48,7 @@ pub trait OpenVpnCommandControl {
     fn stop_service(&mut self, unit: &str) -> Result<(), PrivilegeBrokerError>;
 }
 
-/// Provider-specific OpenVPN implementation of the provider-neutral VPN contract.
+/// Provider-specific `OpenVPN` implementation of the provider-neutral VPN contract.
 #[derive(Debug)]
 pub struct OpenVpnAdapter<C> {
     profiles: Vec<OpenVpnProfile>,
