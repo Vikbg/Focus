@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{PrivilegeBrokerError, VpnActionControl, VpnAdapter};
+use crate::{OpenVpnUnitName, PrivilegeBrokerError, VpnActionControl, VpnAdapter};
 
 const FOCUS_CONFIG_ROOT: &str = "/etc/focus";
 const FOCUS_OPENVPN_CONFIG_ROOT: &str = "/etc/focus/openvpn";
@@ -110,14 +110,18 @@ pub trait OpenVpnCommandControl {
     /// # Errors
     ///
     /// Returns an error when the service cannot be started.
-    fn start_service(&mut self, unit: &str, config: &Path) -> Result<(), PrivilegeBrokerError>;
+    fn start_service(
+        &mut self,
+        unit: &OpenVpnUnitName,
+        config: &Path,
+    ) -> Result<(), PrivilegeBrokerError>;
 
     /// Stops one deterministic Focus-owned `OpenVPN` systemd unit.
     ///
     /// # Errors
     ///
     /// Returns an error when the service cannot be stopped.
-    fn stop_service(&mut self, unit: &str) -> Result<(), PrivilegeBrokerError>;
+    fn stop_service(&mut self, unit: &OpenVpnUnitName) -> Result<(), PrivilegeBrokerError>;
 }
 
 /// Provider-specific `OpenVPN` implementation of the provider-neutral VPN contract.
@@ -155,8 +159,8 @@ impl<C> OpenVpnAdapter<C> {
         Some(profile.config.clone())
     }
 
-    fn unit_for_id(id: u128) -> String {
-        format!("focus-openvpn-{id}.service")
+    fn unit_for_id(id: u128) -> OpenVpnUnitName {
+        OpenVpnUnitName::from_id(id)
     }
 }
 
@@ -171,14 +175,15 @@ impl<C: OpenVpnCommandControl> VpnAdapter for OpenVpnAdapter<C> {
         if !self.command_control.config_is_trusted(&config)? {
             return Err(PrivilegeBrokerError::ActionNotApproved);
         }
-        self.command_control
-            .start_service(&Self::unit_for_id(id), &config)
+        let unit = Self::unit_for_id(id);
+        self.command_control.start_service(&unit, &config)
     }
 
     fn disconnect(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
         self.config_for_id(id)
             .ok_or(PrivilegeBrokerError::ActionNotApproved)?;
-        self.command_control.stop_service(&Self::unit_for_id(id))
+        let unit = Self::unit_for_id(id);
+        self.command_control.stop_service(&unit)
     }
 }
 
@@ -373,11 +378,15 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
         Ok(Self::safe_config_contents(&contents))
     }
 
-    fn start_service(&mut self, _unit: &str, _config: &Path) -> Result<(), PrivilegeBrokerError> {
+    fn start_service(
+        &mut self,
+        _unit: &OpenVpnUnitName,
+        _config: &Path,
+    ) -> Result<(), PrivilegeBrokerError> {
         Err(PrivilegeBrokerError::ActionNotApproved)
     }
 
-    fn stop_service(&mut self, _unit: &str) -> Result<(), PrivilegeBrokerError> {
+    fn stop_service(&mut self, _unit: &OpenVpnUnitName) -> Result<(), PrivilegeBrokerError> {
         Err(PrivilegeBrokerError::ActionNotApproved)
     }
 }
