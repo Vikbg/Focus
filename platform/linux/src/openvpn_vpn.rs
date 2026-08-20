@@ -2,6 +2,11 @@ use std::path::{Path, PathBuf};
 
 use crate::{PrivilegeBrokerError, VpnActionControl, VpnAdapter};
 
+const FOCUS_OPENVPN_CONFIG_ROOT: &str = "/etc/focus/openvpn";
+const OPENVPN_CANDIDATES: [&str; 2] = ["/usr/sbin/openvpn", "/usr/bin/openvpn"];
+const SYSTEMD_RUN_CANDIDATES: [&str; 2] = ["/usr/bin/systemd-run", "/bin/systemd-run"];
+const SYSTEMCTL_CANDIDATES: [&str; 2] = ["/usr/bin/systemctl", "/bin/systemctl"];
+
 /// One pre-approved `OpenVPN` profile bound to a stable Focus VPN id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenVpnProfile {
@@ -117,5 +122,53 @@ impl<C: OpenVpnCommandControl> VpnActionControl for OpenVpnAdapter<C> {
 
     fn disconnect_vpn(&mut self, id: u128) -> Result<(), PrivilegeBrokerError> {
         VpnAdapter::disconnect(self, id)
+    }
+}
+
+/// Production boundary for fixed `OpenVPN`, systemd-run, and systemctl executors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemOpenVpnCommandControl {
+    openvpn: Option<PathBuf>,
+    systemd_run: Option<PathBuf>,
+    systemctl: Option<PathBuf>,
+}
+
+impl Default for SystemOpenVpnCommandControl {
+    fn default() -> Self {
+        Self {
+            openvpn: OPENVPN_CANDIDATES
+                .iter()
+                .map(PathBuf::from)
+                .find(|candidate| candidate.exists()),
+            systemd_run: SYSTEMD_RUN_CANDIDATES
+                .iter()
+                .map(PathBuf::from)
+                .find(|candidate| candidate.exists()),
+            systemctl: SYSTEMCTL_CANDIDATES
+                .iter()
+                .map(PathBuf::from)
+                .find(|candidate| candidate.exists()),
+        }
+    }
+}
+
+impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
+    fn executor_is_trusted(&self) -> Result<bool, PrivilegeBrokerError> {
+        let _all_executors_present =
+            self.openvpn.is_some() && self.systemd_run.is_some() && self.systemctl.is_some();
+        Ok(false)
+    }
+
+    fn config_is_trusted(&self, config: &Path) -> Result<bool, PrivilegeBrokerError> {
+        let _in_fixed_scope = config.parent() == Some(Path::new(FOCUS_OPENVPN_CONFIG_ROOT));
+        Ok(false)
+    }
+
+    fn start_service(&mut self, _unit: &str, _config: &Path) -> Result<(), PrivilegeBrokerError> {
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    }
+
+    fn stop_service(&mut self, _unit: &str) -> Result<(), PrivilegeBrokerError> {
+        Err(PrivilegeBrokerError::ActionNotApproved)
     }
 }
