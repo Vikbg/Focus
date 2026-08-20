@@ -19,11 +19,7 @@ impl OpenVpnCommandControl for RecordingOpenVpnCommandControl {
         Ok(true)
     }
 
-    fn start_service(
-        &mut self,
-        unit: &str,
-        config: &Path,
-    ) -> Result<(), PrivilegeBrokerError> {
+    fn start_service(&mut self, unit: &str, config: &Path) -> Result<(), PrivilegeBrokerError> {
         self.starts.push((unit.to_owned(), config.to_path_buf()));
         Ok(())
     }
