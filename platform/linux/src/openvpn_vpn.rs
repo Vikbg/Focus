@@ -6,6 +6,7 @@ const FOCUS_OPENVPN_CONFIG_ROOT: &str = "/etc/focus/openvpn";
 const OPENVPN_CANDIDATES: [&str; 2] = ["/usr/sbin/openvpn", "/usr/bin/openvpn"];
 const SYSTEMD_RUN_CANDIDATES: [&str; 2] = ["/usr/bin/systemd-run", "/bin/systemd-run"];
 const SYSTEMCTL_CANDIDATES: [&str; 2] = ["/usr/bin/systemctl", "/bin/systemctl"];
+const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 
 /// One pre-approved `OpenVPN` profile bound to a stable Focus VPN id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +150,12 @@ impl Default for SystemOpenVpnCommandControl {
                 .map(PathBuf::from)
                 .find(|candidate| candidate.exists()),
         }
+    }
+}
+
+impl SystemOpenVpnCommandControl {
+    fn trusted_executor_metadata(is_file: bool, owner_uid: u32, mode: u32) -> bool {
+        is_file && owner_uid == 0 && mode & 0o111 != 0 && mode & WRITEABLE_BY_NON_OWNER == 0
     }
 }
 
