@@ -1,8 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use focus_linux::{
-    OpenVpnCommandControl, OpenVpnUnitName, SystemOpenVpnCommandControl,
-};
+use focus_linux::{OpenVpnCommandControl, OpenVpnUnitName, SystemOpenVpnCommandControl};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
