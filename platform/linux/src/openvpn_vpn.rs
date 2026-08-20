@@ -13,6 +13,66 @@ const SYSTEMD_RUN_CANDIDATES: [&str; 2] = ["/usr/bin/systemd-run", "/bin/systemd
 const SYSTEMCTL_CANDIDATES: [&str; 2] = ["/usr/bin/systemctl", "/bin/systemctl"];
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 const VISIBLE_TO_NON_OWNER: u32 = 0o077;
+const ALLOWED_INLINE_BLOCKS: &[&str] = &[
+    "auth-user-pass",
+    "ca",
+    "cert",
+    "crl-verify",
+    "extra-certs",
+    "key",
+    "pkcs12",
+    "secret",
+    "tls-auth",
+    "tls-crypt",
+    "tls-crypt-v2",
+];
+const REJECTED_CONFIG_DIRECTIVES: &[&str] = &[
+    "askpass",
+    "auth-gen-token-secret",
+    "auth-user-pass",
+    "auth-user-pass-verify",
+    "ca",
+    "capath",
+    "cd",
+    "cert",
+    "chroot",
+    "client-connect",
+    "client-crresponse",
+    "client-disconnect",
+    "config",
+    "crl-verify",
+    "daemon",
+    "dh",
+    "down",
+    "extra-certs",
+    "http-proxy-user-pass",
+    "ifconfig-pool-persist",
+    "ipchange",
+    "key",
+    "learn-address",
+    "log",
+    "log-append",
+    "mode",
+    "pkcs12",
+    "plugin",
+    "replay-persist",
+    "route-pre-down",
+    "route-up",
+    "script-security",
+    "secret",
+    "server",
+    "server-bridge",
+    "status",
+    "tls-auth",
+    "tls-crypt",
+    "tls-crypt-v2",
+    "tls-crypt-v2-verify",
+    "tls-export-cert",
+    "tls-verify",
+    "tmp-dir",
+    "up",
+    "writepid",
+];
 
 /// One pre-approved `OpenVPN` profile bound to a stable Focus VPN id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,6 +274,64 @@ impl SystemOpenVpnCommandControl {
         }
         Ok(true)
     }
+
+    fn config_directive_is_rejected(directive: &str) -> bool {
+        directive.starts_with("management") || REJECTED_CONFIG_DIRECTIVES.contains(&directive)
+    }
+
+    fn safe_config_contents(contents: &str) -> bool {
+        let mut inline_block: Option<String> = None;
+
+        for raw_line in contents.lines() {
+            let line = raw_line.trim();
+            if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+                continue;
+            }
+
+            let lowercase = line.to_ascii_lowercase();
+            if let Some(block) = inline_block.as_deref() {
+                if lowercase == format!("</{block}>") {
+                    inline_block = None;
+                    continue;
+                }
+                if lowercase.starts_with('<') && lowercase.ends_with('>') {
+                    return false;
+                }
+                continue;
+            }
+
+            if lowercase.starts_with("</") {
+                return false;
+            }
+            if lowercase.starts_with('<') {
+                let Some(tag) = lowercase
+                    .strip_prefix('<')
+                    .and_then(|value| value.strip_suffix('>'))
+                else {
+                    return false;
+                };
+                if tag.is_empty()
+                    || tag.starts_with('/')
+                    || tag.split_whitespace().count() != 1
+                    || !ALLOWED_INLINE_BLOCKS.contains(&tag)
+                {
+                    return false;
+                }
+                inline_block = Some(tag.to_owned());
+                continue;
+            }
+
+            let Some(raw_directive) = lowercase.split_whitespace().next() else {
+                return false;
+            };
+            let directive = raw_directive.trim_start_matches("--");
+            if directive.is_empty() || Self::config_directive_is_rejected(directive) {
+                return false;
+            }
+        }
+
+        inline_block.is_none()
+    }
 }
 
 impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
@@ -241,12 +359,18 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
 
         let metadata =
             fs::symlink_metadata(config).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
-        Ok(Self::trusted_config_metadata(
+        if !Self::trusted_config_metadata(
             metadata.is_file(),
             metadata.file_type().is_symlink(),
             metadata.uid(),
             metadata.permissions().mode() & 0o777,
-        ))
+        ) {
+            return Ok(false);
+        }
+
+        let contents =
+            fs::read_to_string(config).map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        Ok(Self::safe_config_contents(&contents))
     }
 
     fn start_service(&mut self, _unit: &str, _config: &Path) -> Result<(), PrivilegeBrokerError> {
