@@ -76,7 +76,9 @@ pub use nftables_guard::{
     remove_focus_nftables,
 };
 pub use nix_fanotify::NixFanotifyPermissionSource;
-pub use openvpn_vpn::{OpenVpnAdapter, OpenVpnCommandControl, OpenVpnProfile};
+pub use openvpn_vpn::{
+    OpenVpnAdapter, OpenVpnCommandControl, OpenVpnProfile, SystemOpenVpnCommandControl,
+};
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
