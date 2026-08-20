@@ -6,11 +6,13 @@ use std::{
 
 use crate::{PrivilegeBrokerError, VpnActionControl, VpnAdapter};
 
+const FOCUS_CONFIG_ROOT: &str = "/etc/focus";
 const FOCUS_OPENVPN_CONFIG_ROOT: &str = "/etc/focus/openvpn";
 const OPENVPN_CANDIDATES: [&str; 2] = ["/usr/sbin/openvpn", "/usr/bin/openvpn"];
 const SYSTEMD_RUN_CANDIDATES: [&str; 2] = ["/usr/bin/systemd-run", "/bin/systemd-run"];
 const SYSTEMCTL_CANDIDATES: [&str; 2] = ["/usr/bin/systemctl", "/bin/systemctl"];
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
+const VISIBLE_TO_NON_OWNER: u32 = 0o077;
 
 /// One pre-approved `OpenVPN` profile bound to a stable Focus VPN id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +173,49 @@ impl SystemOpenVpnCommandControl {
             metadata.permissions().mode() & 0o777,
         ))
     }
+
+    fn trusted_config_root_metadata(
+        is_dir: bool,
+        is_symlink: bool,
+        owner_uid: u32,
+        mode: u32,
+    ) -> bool {
+        is_dir && !is_symlink && owner_uid == 0 && mode & WRITEABLE_BY_NON_OWNER == 0
+    }
+
+    fn trusted_config_metadata(
+        is_file: bool,
+        is_symlink: bool,
+        owner_uid: u32,
+        mode: u32,
+    ) -> bool {
+        is_file
+            && !is_symlink
+            && owner_uid == 0
+            && mode & VISIBLE_TO_NON_OWNER == 0
+            && mode & 0o400 != 0
+    }
+
+    fn config_path_is_in_scope(config: &Path) -> bool {
+        config.parent() == Some(Path::new(FOCUS_OPENVPN_CONFIG_ROOT))
+            && matches!(config.extension().and_then(|extension| extension.to_str()), Some("ovpn" | "conf"))
+    }
+
+    fn config_roots_are_trusted() -> Result<bool, PrivilegeBrokerError> {
+        for root in [FOCUS_CONFIG_ROOT, FOCUS_OPENVPN_CONFIG_ROOT] {
+            let metadata = fs::symlink_metadata(root)
+                .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+            if !Self::trusted_config_root_metadata(
+                metadata.is_dir(),
+                metadata.file_type().is_symlink(),
+                metadata.uid(),
+                metadata.permissions().mode() & 0o777,
+            ) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
 }
 
 impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
@@ -192,8 +237,18 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
     }
 
     fn config_is_trusted(&self, config: &Path) -> Result<bool, PrivilegeBrokerError> {
-        let _in_fixed_scope = config.parent() == Some(Path::new(FOCUS_OPENVPN_CONFIG_ROOT));
-        Ok(false)
+        if !Self::config_path_is_in_scope(config) || !Self::config_roots_are_trusted()? {
+            return Ok(false);
+        }
+
+        let metadata = fs::symlink_metadata(config)
+            .map_err(|_| PrivilegeBrokerError::ActionNotApproved)?;
+        Ok(Self::trusted_config_metadata(
+            metadata.is_file(),
+            metadata.file_type().is_symlink(),
+            metadata.uid(),
+            metadata.permissions().mode() & 0o777,
+        ))
     }
 
     fn start_service(&mut self, _unit: &str, _config: &Path) -> Result<(), PrivilegeBrokerError> {
