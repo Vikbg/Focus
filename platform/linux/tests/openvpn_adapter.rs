@@ -43,3 +43,17 @@ fn approved_openvpn_profile_connects_exact_registered_config_under_deterministic
     );
     assert!(adapter.command_control().stops.is_empty());
 }
+
+#[test]
+fn approved_openvpn_profile_disconnects_exact_deterministic_unit() {
+    let config = PathBuf::from("/etc/focus/openvpn/study.ovpn");
+    let profile = OpenVpnProfile::new(51, config);
+    let mut adapter = OpenVpnAdapter::new([profile], RecordingOpenVpnCommandControl::default());
+
+    assert_eq!(adapter.disconnect(51), Ok(()));
+    assert_eq!(
+        adapter.command_control().stops,
+        vec!["focus-openvpn-51.service".to_owned()]
+    );
+    assert!(adapter.command_control().starts.is_empty());
+}
