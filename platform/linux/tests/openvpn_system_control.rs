@@ -1,6 +1,8 @@
 use std::{fs, path::PathBuf};
 
-use focus_linux::{OpenVpnCommandControl, SystemOpenVpnCommandControl};
+use focus_linux::{
+    OpenVpnCommandControl, OpenVpnUnitName, SystemOpenVpnCommandControl,
+};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -37,4 +39,16 @@ fn production_openvpn_control_uses_only_fixed_system_executors_and_focus_config_
             "OpenVPN production control is missing fixed-boundary marker {marker}"
         );
     }
+}
+
+#[test]
+fn openvpn_unit_name_is_derived_deterministically_from_vpn_id() {
+    let unit = OpenVpnUnitName::from_id(42);
+    assert_eq!(unit.as_str(), "focus-openvpn-42.service");
+
+    let max = OpenVpnUnitName::from_id(u128::MAX);
+    assert_eq!(
+        max.as_str(),
+        "focus-openvpn-340282366920938463463374607431768211455.service"
+    );
 }
