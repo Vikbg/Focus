@@ -4,19 +4,32 @@ use focus_linux::{
     OpenVpnAdapter, OpenVpnCommandControl, OpenVpnProfile, PrivilegeBrokerError, VpnAdapter,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct RecordingOpenVpnCommandControl {
+    trusted_executor: bool,
+    trusted_config: bool,
     starts: Vec<(String, PathBuf)>,
     stops: Vec<String>,
 }
 
+impl Default for RecordingOpenVpnCommandControl {
+    fn default() -> Self {
+        Self {
+            trusted_executor: true,
+            trusted_config: true,
+            starts: Vec::new(),
+            stops: Vec::new(),
+        }
+    }
+}
+
 impl OpenVpnCommandControl for RecordingOpenVpnCommandControl {
     fn executor_is_trusted(&self) -> Result<bool, PrivilegeBrokerError> {
-        Ok(true)
+        Ok(self.trusted_executor)
     }
 
     fn config_is_trusted(&self, _config: &Path) -> Result<bool, PrivilegeBrokerError> {
-        Ok(true)
+        Ok(self.trusted_config)
     }
 
     fn start_service(&mut self, unit: &str, config: &Path) -> Result<(), PrivilegeBrokerError> {
@@ -69,6 +82,60 @@ fn duplicate_openvpn_profile_id_is_denied_as_ambiguous() {
         ],
         RecordingOpenVpnCommandControl::default(),
     );
+
+    assert_eq!(
+        adapter.connect(51),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert!(adapter.command_control().starts.is_empty());
+    assert!(adapter.command_control().stops.is_empty());
+}
+
+#[test]
+fn unknown_openvpn_profile_is_denied_before_executor_trust_is_considered() {
+    let config = PathBuf::from("/etc/focus/openvpn/study.ovpn");
+    let profile = OpenVpnProfile::new(51, config);
+    let command = RecordingOpenVpnCommandControl {
+        trusted_executor: false,
+        ..RecordingOpenVpnCommandControl::default()
+    };
+    let mut adapter = OpenVpnAdapter::new([profile], command);
+
+    assert_eq!(
+        adapter.connect(99),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert!(adapter.command_control().starts.is_empty());
+    assert!(adapter.command_control().stops.is_empty());
+}
+
+#[test]
+fn untrusted_openvpn_executor_is_denied_before_service_start() {
+    let config = PathBuf::from("/etc/focus/openvpn/study.ovpn");
+    let profile = OpenVpnProfile::new(51, config);
+    let command = RecordingOpenVpnCommandControl {
+        trusted_executor: false,
+        ..RecordingOpenVpnCommandControl::default()
+    };
+    let mut adapter = OpenVpnAdapter::new([profile], command);
+
+    assert_eq!(
+        adapter.connect(51),
+        Err(PrivilegeBrokerError::UnsafeExecutor)
+    );
+    assert!(adapter.command_control().starts.is_empty());
+    assert!(adapter.command_control().stops.is_empty());
+}
+
+#[test]
+fn untrusted_openvpn_config_is_denied_before_service_start() {
+    let config = PathBuf::from("/etc/focus/openvpn/study.ovpn");
+    let profile = OpenVpnProfile::new(51, config);
+    let command = RecordingOpenVpnCommandControl {
+        trusted_config: false,
+        ..RecordingOpenVpnCommandControl::default()
+    };
+    let mut adapter = OpenVpnAdapter::new([profile], command);
 
     assert_eq!(
         adapter.connect(51),
