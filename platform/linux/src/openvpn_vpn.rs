@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn openvpn_config_accepts_client_profile_with_inline_credentials() {
-        let config = r#"
+        let config = r"
 client
 dev tun
 proto udp
@@ -518,7 +518,7 @@ inline-tls-crypt
 study-user
 study-password
 </auth-user-pass>
-"#;
+";
 
         assert!(SystemOpenVpnCommandControl::safe_config_contents(config));
     }
