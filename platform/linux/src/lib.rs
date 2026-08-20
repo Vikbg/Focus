@@ -15,6 +15,7 @@ mod linux_process_control;
 mod network_guard;
 mod nftables_guard;
 mod nix_fanotify;
+mod openvpn_unit_name;
 mod openvpn_vpn;
 mod preflight;
 mod privilege_guard;
@@ -76,6 +77,7 @@ pub use nftables_guard::{
     remove_focus_nftables,
 };
 pub use nix_fanotify::NixFanotifyPermissionSource;
+pub use openvpn_unit_name::OpenVpnUnitName;
 pub use openvpn_vpn::{
     OpenVpnAdapter, OpenVpnCommandControl, OpenVpnProfile, SystemOpenVpnCommandControl,
 };
