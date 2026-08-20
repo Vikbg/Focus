@@ -15,6 +15,7 @@ mod linux_process_control;
 mod network_guard;
 mod nftables_guard;
 mod nix_fanotify;
+mod openvpn_vpn;
 mod preflight;
 mod privilege_guard;
 mod privilege_session;
@@ -75,6 +76,7 @@ pub use nftables_guard::{
     remove_focus_nftables,
 };
 pub use nix_fanotify::NixFanotifyPermissionSource;
+pub use openvpn_vpn::{OpenVpnAdapter, OpenVpnCommandControl, OpenVpnProfile};
 pub use preflight::{
     Health, HostSystemProbe, LinuxError, LinuxPreflightReport, SystemProbe, evaluate_preflight,
     preflight, require_strict_preflight,
