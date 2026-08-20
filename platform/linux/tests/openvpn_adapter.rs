@@ -57,3 +57,23 @@ fn approved_openvpn_profile_disconnects_exact_deterministic_unit() {
     );
     assert!(adapter.command_control().starts.is_empty());
 }
+
+#[test]
+fn duplicate_openvpn_profile_id_is_denied_as_ambiguous() {
+    let first = PathBuf::from("/etc/focus/openvpn/study.ovpn");
+    let second = PathBuf::from("/etc/focus/openvpn/alternate.ovpn");
+    let mut adapter = OpenVpnAdapter::new(
+        [
+            OpenVpnProfile::new(51, first),
+            OpenVpnProfile::new(51, second),
+        ],
+        RecordingOpenVpnCommandControl::default(),
+    );
+
+    assert_eq!(
+        adapter.connect(51),
+        Err(PrivilegeBrokerError::ActionNotApproved)
+    );
+    assert!(adapter.command_control().starts.is_empty());
+    assert!(adapter.command_control().stops.is_empty());
+}
