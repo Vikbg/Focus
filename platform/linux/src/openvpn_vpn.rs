@@ -172,3 +172,27 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
         Err(PrivilegeBrokerError::ActionNotApproved)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SystemOpenVpnCommandControl;
+
+    #[test]
+    fn trusted_openvpn_executor_requires_root_owned_non_writable_executable_file() {
+        assert!(SystemOpenVpnCommandControl::trusted_executor_metadata(
+            true, 0, 0o755
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_executor_metadata(
+            true, 1000, 0o755
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_executor_metadata(
+            true, 0, 0o775
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_executor_metadata(
+            true, 0, 0o644
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_executor_metadata(
+            false, 0, 0o755
+        ));
+    }
+}
