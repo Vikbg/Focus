@@ -1,4 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+};
 
 use crate::{PrivilegeBrokerError, VpnActionControl, VpnAdapter};
 
@@ -6,7 +10,6 @@ const FOCUS_OPENVPN_CONFIG_ROOT: &str = "/etc/focus/openvpn";
 const OPENVPN_CANDIDATES: [&str; 2] = ["/usr/sbin/openvpn", "/usr/bin/openvpn"];
 const SYSTEMD_RUN_CANDIDATES: [&str; 2] = ["/usr/bin/systemd-run", "/bin/systemd-run"];
 const SYSTEMCTL_CANDIDATES: [&str; 2] = ["/usr/bin/systemctl", "/bin/systemctl"];
-#[cfg(test)]
 const WRITEABLE_BY_NON_OWNER: u32 = 0o022;
 
 /// One pre-approved `OpenVPN` profile bound to a stable Focus VPN id.
@@ -155,17 +158,37 @@ impl Default for SystemOpenVpnCommandControl {
 }
 
 impl SystemOpenVpnCommandControl {
-    #[cfg(test)]
     fn trusted_executor_metadata(is_file: bool, owner_uid: u32, mode: u32) -> bool {
         is_file && owner_uid == 0 && mode & 0o111 != 0 && mode & WRITEABLE_BY_NON_OWNER == 0
+    }
+
+    fn trusted_executor_path(path: &Path) -> Result<bool, PrivilegeBrokerError> {
+        let canonical = fs::canonicalize(path).map_err(|_| PrivilegeBrokerError::UnsafeExecutor)?;
+        let metadata = fs::metadata(canonical).map_err(|_| PrivilegeBrokerError::UnsafeExecutor)?;
+        Ok(Self::trusted_executor_metadata(
+            metadata.is_file(),
+            metadata.uid(),
+            metadata.permissions().mode() & 0o777,
+        ))
     }
 }
 
 impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
     fn executor_is_trusted(&self) -> Result<bool, PrivilegeBrokerError> {
-        let _all_executors_present =
-            self.openvpn.is_some() && self.systemd_run.is_some() && self.systemctl.is_some();
-        Ok(false)
+        let (Some(openvpn), Some(systemd_run), Some(systemctl)) = (
+            self.openvpn.as_deref(),
+            self.systemd_run.as_deref(),
+            self.systemctl.as_deref(),
+        ) else {
+            return Ok(false);
+        };
+
+        for executor in [openvpn, systemd_run, systemctl] {
+            if !Self::trusted_executor_path(executor)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     fn config_is_trusted(&self, config: &Path) -> Result<bool, PrivilegeBrokerError> {
