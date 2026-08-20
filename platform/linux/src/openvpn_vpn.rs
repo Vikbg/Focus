@@ -184,7 +184,9 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
 
 #[cfg(test)]
 mod tests {
-    use super::SystemOpenVpnCommandControl;
+    use std::path::PathBuf;
+
+    use super::{OpenVpnCommandControl, SystemOpenVpnCommandControl};
 
     #[test]
     fn trusted_openvpn_executor_requires_root_owned_non_writable_executable_file() {
@@ -203,5 +205,23 @@ mod tests {
         assert!(!SystemOpenVpnCommandControl::trusted_executor_metadata(
             false, 0, 0o755
         ));
+    }
+
+    #[test]
+    fn production_executor_trust_requires_all_three_trusted_paths() {
+        let trusted = PathBuf::from("/bin/sh");
+        let control = SystemOpenVpnCommandControl {
+            openvpn: Some(trusted.clone()),
+            systemd_run: Some(trusted.clone()),
+            systemctl: Some(trusted.clone()),
+        };
+        assert_eq!(control.executor_is_trusted(), Ok(true));
+
+        let missing_openvpn = SystemOpenVpnCommandControl {
+            openvpn: None,
+            systemd_run: Some(trusted.clone()),
+            systemctl: Some(trusted),
+        };
+        assert_eq!(missing_openvpn.executor_is_trusted(), Ok(false));
     }
 }
