@@ -207,7 +207,7 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use super::{OpenVpnCommandControl, SystemOpenVpnCommandControl};
 
@@ -246,5 +246,65 @@ mod tests {
             systemctl: Some(trusted),
         };
         assert_eq!(missing_openvpn.executor_is_trusted(), Ok(false));
+    }
+
+    #[test]
+    fn trusted_openvpn_config_root_requires_root_owned_non_writable_directory() {
+        assert!(SystemOpenVpnCommandControl::trusted_config_root_metadata(
+            true, false, 0, 0o755
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_root_metadata(
+            false, false, 0, 0o755
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_root_metadata(
+            true, true, 0, 0o755
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_root_metadata(
+            true, false, 1000, 0o755
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_root_metadata(
+            true, false, 0, 0o775
+        ));
+    }
+
+    #[test]
+    fn trusted_openvpn_config_requires_root_owned_private_regular_file() {
+        assert!(SystemOpenVpnCommandControl::trusted_config_metadata(
+            true, false, 0, 0o600
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_metadata(
+            false, false, 0, 0o600
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_metadata(
+            true, true, 0, 0o600
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_metadata(
+            true, false, 1000, 0o600
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_metadata(
+            true, false, 0, 0o640
+        ));
+        assert!(!SystemOpenVpnCommandControl::trusted_config_metadata(
+            true, false, 0, 0o200
+        ));
+    }
+
+    #[test]
+    fn openvpn_config_scope_allows_only_direct_ovpn_or_conf_children() {
+        assert!(SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
+            "/etc/focus/openvpn/study.ovpn"
+        )));
+        assert!(SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
+            "/etc/focus/openvpn/study.conf"
+        )));
+        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
+            "/etc/focus/openvpn/nested/study.ovpn"
+        )));
+        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
+            "/etc/focus/openvpn/study.txt"
+        )));
+        assert!(!SystemOpenVpnCommandControl::config_path_is_in_scope(Path::new(
+            "/tmp/study.ovpn"
+        )));
     }
 }
