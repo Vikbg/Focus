@@ -2,6 +2,7 @@ use std::{
     fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
 };
 
 use crate::{OpenVpnUnitName, PrivilegeBrokerError, VpnActionControl, VpnAdapter};
@@ -337,6 +338,87 @@ impl SystemOpenVpnCommandControl {
 
         inline_block.is_none()
     }
+
+    fn run_start_command(
+        &self,
+        unit: &OpenVpnUnitName,
+        config: &Path,
+    ) -> Result<(), PrivilegeBrokerError> {
+        let (Some(systemd_run), Some(openvpn)) =
+            (self.systemd_run.as_deref(), self.openvpn.as_deref())
+        else {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        };
+        if !Self::trusted_executor_path(systemd_run)? || !Self::trusted_executor_path(openvpn)? {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        }
+
+        let status = Command::new(systemd_run)
+            .arg("--no-ask-password")
+            .arg("--unit")
+            .arg(unit.as_str())
+            .arg("--property=Type=exec")
+            .arg("--collect")
+            .arg("--")
+            .arg(openvpn)
+            .arg("--config")
+            .arg(config)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(PrivilegeBrokerError::ActionFailed)
+        }
+    }
+
+    fn verify_service_active(&self, unit: &OpenVpnUnitName) -> Result<bool, PrivilegeBrokerError> {
+        let Some(systemctl) = self.systemctl.as_deref() else {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        };
+        if !Self::trusted_executor_path(systemctl)? {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        }
+
+        let status = Command::new(systemctl)
+            .arg("--no-ask-password")
+            .arg("--quiet")
+            .arg("is-active")
+            .arg(unit.as_str())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
+        Ok(status.success())
+    }
+
+    fn run_stop_command(&self, unit: &OpenVpnUnitName) -> Result<(), PrivilegeBrokerError> {
+        let Some(systemctl) = self.systemctl.as_deref() else {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        };
+        if !Self::trusted_executor_path(systemctl)? {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        }
+
+        let status = Command::new(systemctl)
+            .arg("--no-ask-password")
+            .arg("stop")
+            .arg(unit.as_str())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| PrivilegeBrokerError::ActionFailed)?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(PrivilegeBrokerError::ActionFailed)
+        }
+    }
 }
 
 impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
@@ -380,14 +462,27 @@ impl OpenVpnCommandControl for SystemOpenVpnCommandControl {
 
     fn start_service(
         &mut self,
-        _unit: &OpenVpnUnitName,
-        _config: &Path,
+        unit: &OpenVpnUnitName,
+        config: &Path,
     ) -> Result<(), PrivilegeBrokerError> {
-        Err(PrivilegeBrokerError::ActionNotApproved)
+        if !self.executor_is_trusted()? {
+            return Err(PrivilegeBrokerError::UnsafeExecutor);
+        }
+        if !self.config_is_trusted(config)? {
+            return Err(PrivilegeBrokerError::ActionNotApproved);
+        }
+
+        self.run_start_command(unit, config)?;
+        if self.verify_service_active(unit)? {
+            Ok(())
+        } else {
+            let _ = self.run_stop_command(unit);
+            Err(PrivilegeBrokerError::ActionFailed)
+        }
     }
 
-    fn stop_service(&mut self, _unit: &OpenVpnUnitName) -> Result<(), PrivilegeBrokerError> {
-        Err(PrivilegeBrokerError::ActionNotApproved)
+    fn stop_service(&mut self, unit: &OpenVpnUnitName) -> Result<(), PrivilegeBrokerError> {
+        self.run_stop_command(unit)
     }
 }
 
