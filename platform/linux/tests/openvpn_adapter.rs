@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use focus_linux::{
-    OpenVpnAdapter, OpenVpnCommandControl, OpenVpnProfile, PrivilegeBrokerError, VpnAdapter,
+    OpenVpnAdapter, OpenVpnCommandControl, OpenVpnProfile, OpenVpnUnitName, PrivilegeBrokerError,
+    VpnAdapter,
 };
 
 #[derive(Debug)]
@@ -32,13 +33,18 @@ impl OpenVpnCommandControl for RecordingOpenVpnCommandControl {
         Ok(self.trusted_config)
     }
 
-    fn start_service(&mut self, unit: &str, config: &Path) -> Result<(), PrivilegeBrokerError> {
-        self.starts.push((unit.to_owned(), config.to_path_buf()));
+    fn start_service(
+        &mut self,
+        unit: &OpenVpnUnitName,
+        config: &Path,
+    ) -> Result<(), PrivilegeBrokerError> {
+        self.starts
+            .push((unit.as_str().to_owned(), config.to_path_buf()));
         Ok(())
     }
 
-    fn stop_service(&mut self, unit: &str) -> Result<(), PrivilegeBrokerError> {
-        self.stops.push(unit.to_owned());
+    fn stop_service(&mut self, unit: &OpenVpnUnitName) -> Result<(), PrivilegeBrokerError> {
+        self.stops.push(unit.as_str().to_owned());
         Ok(())
     }
 }
