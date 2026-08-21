@@ -236,7 +236,7 @@ fn decode_text(value: &str) -> Result<String, WireError> {
 
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let high = decode_hex_nibble(pair[0]).ok_or(WireError::InvalidArgument)?;
         let low = decode_hex_nibble(pair[1]).ok_or(WireError::InvalidArgument)?;
         decoded.push((high << 4) | low);
